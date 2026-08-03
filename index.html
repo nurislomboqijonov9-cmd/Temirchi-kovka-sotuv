@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="uz">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Kovka</title>
+<style>
+  :root{--bg:#EEF3F1;--card:#fff;--ink:#183A31;--sub:#5E7A70;--brand:#1E7A5A;--brand2:#166046;
+        --line:#D9E4DF;--danger:#C0492E;--soft:#EAF2EE;}
+  body.tun{--bg:#0F1A17;--card:#16241F;--ink:#E7F0EC;--sub:#9DB4AC;--line:#25382F;--soft:#1B2C26;}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,Roboto,"Segoe UI",sans-serif;padding-bottom:40px}
+  .top{background:linear-gradient(135deg,#12332A,#1E7A5A);color:#fff;padding:14px 16px;display:flex;align-items:center;justify-content:space-between;font-size:13px}
+  .top b{font-size:16px}
+  .wrap{max-width:640px;margin:0 auto;padding:12px}
+  .card{background:var(--card);border-radius:16px;padding:14px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,.05)}
+  .f{width:100%;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--ink);font-size:15px;outline:none}
+  .row{display:flex;gap:8px;align-items:center}
+  .btn{padding:12px 14px;border:0;border-radius:12px;font-size:15px;font-weight:600;cursor:pointer;background:var(--brand);color:#fff}
+  .btn.g{background:var(--soft);color:var(--ink);border:1px solid var(--line)}
+  .btn.d{background:transparent;color:var(--danger);border:1px solid var(--line)}
+  .mini{padding:9px 10px;border-radius:10px;font-size:13.5px;font-weight:600;border:1px solid var(--line);background:var(--soft);color:var(--ink);cursor:pointer}
+  .hero{background:linear-gradient(135deg,#14332A,#1E7A5A);color:#fff;border-radius:18px;padding:18px;margin-bottom:12px}
+  .hero .lbl{font-size:12px;letter-spacing:.14em;opacity:.85;text-transform:uppercase}
+  .hero .big{font-size:34px;font-weight:800;margin-top:4px}
+  .hero.ok{background:linear-gradient(135deg,#1b4a3a,#2E9E6E)}
+  .mrow{display:flex;justify-content:space-between;align-items:center;padding:11px 0;border-bottom:1px solid var(--line)}
+  .mrow:last-child{border-bottom:0}
+  .mnom{font-weight:600}
+  .msub{font-size:12.5px;color:var(--sub)}
+  .pill{font-size:12px;padding:3px 9px;border-radius:20px;background:var(--soft);color:var(--brand2);font-weight:700}
+  .pill.red{background:#FBE9E4;color:#B23A20}
+  .x{color:var(--danger);font-weight:700;cursor:pointer;padding:4px 8px}
+  .t{font-weight:700;margin-bottom:8px}
+  .hint{color:var(--sub);font-size:13px}
+  .back{color:var(--brand);font-weight:600;cursor:pointer;display:inline-block;margin-bottom:8px}
+  .seg{display:flex;background:var(--soft);border-radius:12px;padding:3px;margin-bottom:12px}
+  .seg button{flex:1;border:0;background:transparent;padding:9px;border-radius:10px;font-weight:600;color:var(--sub);cursor:pointer}
+  .seg button.on{background:var(--card);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+  .fab{position:fixed;right:16px;bottom:20px;width:56px;height:56px;border-radius:50%;background:var(--brand);color:#fff;font-size:28px;border:0;box-shadow:0 6px 18px rgba(30,122,90,.4);cursor:pointer;z-index:50}
+  .toast{position:fixed;left:50%;bottom:88px;transform:translateX(-50%);background:#12332A;color:#fff;padding:11px 16px;border-radius:12px;font-size:14px;z-index:200;opacity:0;transition:.2s;max-width:90%}
+  .toast.on{opacity:1}
+  .tsov{position:fixed;inset:0;background:rgba(8,18,16,.55);display:flex;align-items:center;justify-content:center;z-index:300;padding:24px}
+  .tsbox{background:var(--card);color:var(--ink);border-radius:18px;max-width:340px;width:100%;padding:20px}
+  .tsbtns{display:flex;gap:10px;margin-top:16px}
+  .tsbtns button{flex:1;padding:12px;border-radius:12px;border:0;font-weight:700;font-size:15px;cursor:pointer}
+  .tsno{background:transparent;color:var(--ink);border:1px solid var(--line)}
+  .tsyes{background:var(--brand);color:#fff}
+  .empty{text-align:center;color:var(--sub);padding:30px 10px}
+</style>
+</head>
+<body>
+<div class="top"><div><b>🔨 KOVKA</b></div><div id="clock"></div></div>
+<div class="wrap" id="app"><div class="empty">Yuklanmoqda…</div></div>
+<button class="fab" id="fab" onclick="mijozQoshOyna()" style="display:none">＋</button>
+<div id="toast" class="toast"></div>
+
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script>
+const tg = window.Telegram && window.Telegram.WebApp;
+try{ if(tg){ tg.ready(); tg.expand(); if(tg.colorScheme==='dark') document.body.classList.add('tun'); } }catch(e){}
+const INIT = (tg && tg.initData) || '';
+
+function tick(){ const d=new Date(); document.getElementById('clock').textContent=d.toLocaleDateString('ru-RU')+' · '+d.toTimeString().slice(0,5); }
+tick(); setInterval(tick,30000);
+
+const som=n=>{ n=Math.round(Number(n)||0); return n.toLocaleString('ru-RU').replace(/,/g,' '); };
+const esc=s=>(s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const bugun=new Date().toISOString().slice(0,10);
+let _view='mijozlar';
+
+function toast(t){ const e=document.getElementById('toast'); e.textContent=t; e.classList.add('on'); setTimeout(()=>e.classList.remove('on'),2200); }
+function tasdiq(msg){ return new Promise(res=>{ const ov=document.createElement('div'); ov.className='tsov';
+  ov.innerHTML='<div class="tsbox"><div class="tmsg"></div><div class="tsbtns"><button class="tsno">Bekor</button><button class="tsyes">Ha</button></div></div>';
+  ov.querySelector('.tmsg').textContent=msg;
+  const done=v=>{ if(ov.parentNode)ov.parentNode.removeChild(ov); res(v); };
+  ov.querySelector('.tsyes').onclick=()=>done(true); ov.querySelector('.tsno').onclick=()=>done(false);
+  ov.addEventListener('click',e=>{ if(e.target===ov)done(false); }); document.body.appendChild(ov); }); }
+
+async function api(path, opts){
+  opts=opts||{}; opts.headers=Object.assign({'X-Init-Data':INIT,'Content-Type':'application/json'}, opts.headers||{});
+  const r=await fetch(path, opts);
+  if(!r.ok){ let e={}; try{e=await r.json();}catch(_){} throw new Error(e.xato||('Xato '+r.status)); }
+  return r.json();
+}
+
+// ============ MIJOZLAR RO'YXATI ============
+async function loadList(){
+  const app=document.getElementById('app');
+  document.getElementById('fab').style.display='block';
+  app.innerHTML='<div class="empty">Yuklanmoqda…</div>';
+  let data;
+  try{ data=await api(_view==='qarzdor'?'/api/qarzdorlar':'/api/mijozlar'); }
+  catch(e){ app.innerHTML='<div class="card"><div class="hint">'+esc(e.message)+'</div></div>'; return; }
+  const list=data.mijozlar||[];
+  let h='<div class="seg"><button class="'+(_view==='mijozlar'?'on':'')+'" onclick="setView(\'mijozlar\')">Hammasi</button>'
+       +'<button class="'+(_view==='qarzdor'?'on':'')+'" onclick="setView(\'qarzdor\')">Qarzdorlar</button></div>';
+  h+='<input class="f" id="qidir" placeholder="🔍 Qidirish — ism yoki tel" oninput="filt()" style="margin-bottom:12px">';
+  if(!list.length){ h+='<div class="empty">Hozircha mijoz yo\'q.<br>Pastdagi ＋ tugma bilan qo\'shing.</div>'; app.innerHTML=h; return; }
+  h+='<div id="mlist">'+list.map(m=>{
+    const q=m.qarz||0;
+    return '<div class="card mitem" data-nom="'+esc((m.ism||'').toLowerCase())+' '+esc(m.tel||'')+'" onclick="openMijoz('+m.id+')" style="cursor:pointer;margin-bottom:10px">'
+      +'<div class="row" style="justify-content:space-between">'
+      +'<div><div class="mnom">'+esc(m.ism||'—')+'</div><div class="msub">'+esc(m.tel||'')+'</div></div>'
+      +'<div style="text-align:right"><div class="'+(q>0?'pill red':'pill')+'">'+som(q)+' so\'m</div></div></div></div>';
+  }).join('')+'</div>';
+  app.innerHTML=h;
+}
+function setView(v){ _view=v; loadList(); }
+function filt(){ const t=(document.getElementById('qidir').value||'').toLowerCase();
+  document.querySelectorAll('#mlist .mitem').forEach(el=>{ el.style.display=(el.dataset.nom.indexOf(t)>=0)?'block':'none'; }); }
+
+// ============ MIJOZ KARTASI ============
+async function openMijoz(id){
+  const app=document.getElementById('app');
+  document.getElementById('fab').style.display='none';
+  app.innerHTML='<div class="empty">Yuklanmoqda…</div>';
+  let d;
+  try{ d=await api('/api/mijoz?id='+id); }
+  catch(e){ app.innerHTML='<div class="card"><div class="hint">'+esc(e.message)+'</div></div>'; return; }
+  window._m=d;
+  const q=d.qarz||0;
+  let h='<span class="back" onclick="loadList()">‹ Orqaga</span>';
+  h+='<div class="row" style="justify-content:space-between;margin-bottom:6px">'
+   +'<div><div class="msub">MIJOZ · '+esc(d.tel||'—')+'</div><div style="font-size:22px;font-weight:800">'+esc(d.ism||'—')+'</div></div>'
+   +'<button class="mini" onclick="mijozTahrirOyna()">✏️ Tahrir</button></div>';
+  h+='<div class="hero '+(q>0?'':'ok')+'"><div class="lbl">Qolgan qarzi</div><div class="big">'+som(q)+' <span style="font-size:16px">so\'m</span></div>'
+   +'<div style="opacity:.85;font-size:13px;margin-top:4px">Jami: '+som(d.jami)+' · To\'langan: '+som(d.tolangan)+'</div></div>';
+
+  // Mahsulot qo'shish
+  h+='<div class="card"><div class="t">➕ Mahsulot qo\'shish</div>'
+   +'<input class="f" id="p_nom" placeholder="Nomi (masalan: Darvoza)" style="margin-bottom:8px">'
+   +'<div class="row" style="margin-bottom:8px"><input class="f" id="p_narx" inputmode="numeric" placeholder="Narxi (so\'m)">'
+   +'<input class="f" id="p_dona" inputmode="numeric" placeholder="Dona" value="1" style="max-width:90px"></div>'
+   +'<button class="btn" style="width:100%" onclick="mahsulotQosh('+id+')">Qo\'shish</button></div>';
+
+  // Mahsulotlar ro'yxati
+  h+='<div class="card"><div class="t">📦 Mahsulotlar</div>';
+  if(!d.mahsulotlar.length){ h+='<div class="hint">Hali mahsulot yo\'q.</div>'; }
+  else{ h+=d.mahsulotlar.map(r=>'<div class="mrow"><div><div class="mnom">'+esc(r.nom)+'</div>'
+      +'<div class="msub">'+som(r.narx)+' so\'m'+((r.dona&&r.dona!=1)?(' × '+(+r.dona)):'')+' · '+esc((r.sana||'').slice(0,10))+'</div></div>'
+      +'<div class="row"><div class="pill">'+som(r.jami)+'</div><span class="x" onclick="mahsulotOchir('+r.id+','+id+')">✕</span></div></div>').join(''); }
+  h+='</div>';
+
+  // To'lov qo'shish
+  h+='<div class="card"><div class="t">💵 To\'lov qo\'shish</div>'
+   +'<div class="row"><input class="f" id="t_summa" inputmode="numeric" placeholder="Summa (so\'m)">'
+   +'<button class="btn" onclick="tolovQosh('+id+')">➕</button></div>'
+   +'<div class="hint" style="margin-top:6px">To\'lov qarzdan ayiriladi.</div></div>';
+
+  // To'lovlar ro'yxati
+  if(d.tolovlar.length){
+    h+='<div class="card"><div class="t">🧾 To\'lovlar</div>'+d.tolovlar.map(t=>'<div class="mrow"><div><div class="mnom">'+som(t.summa)+' so\'m</div>'
+      +'<div class="msub">'+esc((t.sana||'').slice(0,10))+(t.izoh?(' · '+esc(t.izoh)):'')+'</div></div>'
+      +'<span class="x" onclick="tolovOchir('+t.id+','+id+')">✕</span></div>').join('')+'</div>';
+  }
+
+  h+='<button class="btn d" style="width:100%;margin-top:6px" onclick="mijozOchir('+id+')">🗑 Mijozni o\'chirish</button>';
+  app.innerHTML=h;
+}
+
+async function mahsulotQosh(id){
+  const nom=(document.getElementById('p_nom').value||'').trim();
+  const narx=(document.getElementById('p_narx').value||'').trim();
+  const dona=(document.getElementById('p_dona').value||'1').trim();
+  if(!nom){ toast('Nom yozing'); return; }
+  try{ await api('/api/mahsulot_qosh',{method:'POST',body:JSON.stringify({mijoz_id:id,nom,narx,dona,sana:bugun})}); toast('✅ Qo\'shildi'); openMijoz(id); }
+  catch(e){ toast('❌ '+e.message); }
+}
+async function mahsulotOchir(rid,id){
+  if(!await tasdiq('Bu mahsulotni o\'chirasizmi?')) return;
+  try{ await api('/api/mahsulot_ochir',{method:'POST',body:JSON.stringify({id:rid})}); openMijoz(id); }catch(e){ toast('❌ '+e.message); }
+}
+async function tolovQosh(id){
+  const s=(document.getElementById('t_summa').value||'').trim();
+  if(!s){ toast('Summa yozing'); return; }
+  try{ await api('/api/tolov_qosh',{method:'POST',body:JSON.stringify({mijoz_id:id,summa:s,sana:bugun})}); toast('✅ To\'lov qo\'shildi'); openMijoz(id); }
+  catch(e){ toast('❌ '+e.message); }
+}
+async function tolovOchir(rid,id){
+  if(!await tasdiq('Bu to\'lovni o\'chirasizmi?')) return;
+  try{ await api('/api/tolov_ochir',{method:'POST',body:JSON.stringify({id:rid})}); openMijoz(id); }catch(e){ toast('❌ '+e.message); }
+}
+async function mijozOchir(id){
+  if(!await tasdiq('Mijozni va uning barcha ma\'lumotlarini o\'chirasizmi?')) return;
+  try{ await api('/api/mijoz_ochir',{method:'POST',body:JSON.stringify({id})}); toast('🗑 O\'chirildi'); loadList(); }catch(e){ toast('❌ '+e.message); }
+}
+
+// ============ MIJOZ QO'SHISH / TAHRIR ============
+function _oyna(html){ const ov=document.createElement('div'); ov.className='tsov';
+  ov.innerHTML='<div class="tsbox">'+html+'</div>';
+  ov.addEventListener('click',e=>{ if(e.target===ov) ov.remove(); }); document.body.appendChild(ov); return ov; }
+function mijozQoshOyna(){
+  const ov=_oyna('<div class="t">Yangi mijoz</div>'
+    +'<input class="f" id="nm_ism" placeholder="Ism" style="margin-bottom:8px">'
+    +'<input class="f" id="nm_tel" inputmode="tel" placeholder="Telefon (ixtiyoriy)">'
+    +'<div class="tsbtns"><button class="tsno" onclick="this.closest(\'.tsov\').remove()">Bekor</button><button class="tsyes" id="nm_ok">Saqlash</button></div>');
+  ov.querySelector('#nm_ok').onclick=async()=>{ const ism=(ov.querySelector('#nm_ism').value||'').trim(); if(!ism){toast('Ism yozing');return;}
+    try{ const r=await api('/api/mijoz_qosh',{method:'POST',body:JSON.stringify({ism,tel:ov.querySelector('#nm_tel').value})}); ov.remove(); openMijoz(r.id); }catch(e){ toast('❌ '+e.message); } };
+}
+function mijozTahrirOyna(){
+  const d=window._m||{};
+  const ov=_oyna('<div class="t">Tahrir</div>'
+    +'<input class="f" id="e_ism" placeholder="Ism" value="'+esc(d.ism||'')+'" style="margin-bottom:8px">'
+    +'<input class="f" id="e_tel" inputmode="tel" placeholder="Telefon" value="'+esc(d.tel||'')+'">'
+    +'<div class="tsbtns"><button class="tsno" onclick="this.closest(\'.tsov\').remove()">Bekor</button><button class="tsyes" id="e_ok">Saqlash</button></div>');
+  ov.querySelector('#e_ok').onclick=async()=>{ try{ await api('/api/mijoz_tahrir',{method:'POST',body:JSON.stringify({id:d.id,ism:ov.querySelector('#e_ism').value,tel:ov.querySelector('#e_tel').value})}); ov.remove(); openMijoz(d.id); }catch(e){ toast('❌ '+e.message); } };
+}
+
+loadList();
+</script>
+</body>
+</html>
