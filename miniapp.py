@@ -156,7 +156,8 @@ def make_web_app(bot_token):
             dona = float(str(b.get("dona") or 1).replace(" ", "")) or 1
         except Exception:
             dona = 1
-        db.mahsulot_qosh(mid, nom, narx, dona, b.get("sana"))
+        db.mahsulot_qosh(mid, nom, narx, dona, b.get("sana"),
+                         eni=b.get("eni"), boyi=b.get("boyi"))
         d = db.mijoz_hisob(mid)
         return web.json_response({"ok": True, "qarz": d["qarz"] if d else 0})
 
