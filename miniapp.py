@@ -157,7 +157,7 @@ def make_web_app(bot_token):
         except Exception:
             dona = 1
         db.mahsulot_qosh(mid, nom, narx, dona, b.get("sana"),
-                         eni=b.get("eni"), boyi=b.get("boyi"))
+                         eni=b.get("eni"), boyi=b.get("boyi"), valyuta=b.get("valyuta"))
         d = db.mijoz_hisob(mid)
         return web.json_response({"ok": True, "qarz": d["qarz"] if d else 0})
 
@@ -181,7 +181,7 @@ def make_web_app(bot_token):
             return web.json_response({"xato": "summa kerak"}, status=400)
         if summa == 0:
             return web.json_response({"xato": "Summa 0 bo'lmasin"}, status=400)
-        db.tolov_qosh(mid, summa, b.get("sana"), b.get("izoh"))
+        db.tolov_qosh(mid, summa, b.get("sana"), b.get("izoh"), valyuta=b.get("valyuta"))
         d = db.mijoz_hisob(mid)
         return web.json_response({"ok": True, "qarz": d["qarz"] if d else 0})
 

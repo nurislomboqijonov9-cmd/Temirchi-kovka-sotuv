@@ -52,7 +52,7 @@ def init_db():
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         mijoz_id INTEGER, nom TEXT, narx REAL, dona REAL DEFAULT 1,
         sana TEXT, created TEXT)""")
-    for col in ("eni REAL", "boyi REAL"):
+    for col in ("eni REAL", "boyi REAL", "valyuta TEXT DEFAULT 'usd'"):
         try:
             con.execute(f"ALTER TABLE mahsulotlar ADD COLUMN {col}")
         except Exception:
@@ -60,6 +60,10 @@ def init_db():
     con.execute("""CREATE TABLE IF NOT EXISTS tolovlar(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         mijoz_id INTEGER, summa REAL, sana TEXT, izoh TEXT, created TEXT)""")
+    try:
+        con.execute("ALTER TABLE tolovlar ADD COLUMN valyuta TEXT DEFAULT 'usd'")
+    except Exception:
+        pass
     con.commit()
     con.close()
 
@@ -108,7 +112,7 @@ def mijoz_qidir(nom):
 
 
 # ---------------- Mahsulot / To'lov ----------------
-def mahsulot_qosh(mijoz_id, nom, narx, dona=1, sana=None, eni=None, boyi=None):
+def mahsulot_qosh(mijoz_id, nom, narx, dona=1, sana=None, eni=None, boyi=None, valyuta="usd"):
     con = _con()
     try:
         eni = float(eni) if eni not in (None, "") else None
@@ -117,9 +121,10 @@ def mahsulot_qosh(mijoz_id, nom, narx, dona=1, sana=None, eni=None, boyi=None):
         eni = boyi = None
     if eni and boyi:
         dona = round(eni * boyi, 3)   # kvadrat = eni * bo'yi; narx = 1 m^2 narxi
+    val = "som" if str(valyuta).lower() in ("som", "so'm", "uzs") else "usd"
     cur = con.execute(
-        "INSERT INTO mahsulotlar(mijoz_id,nom,narx,dona,eni,boyi,sana,created) VALUES(?,?,?,?,?,?,?,?)",
-        (mijoz_id, nom, float(narx or 0), float(dona or 1), eni, boyi,
+        "INSERT INTO mahsulotlar(mijoz_id,nom,narx,dona,eni,boyi,valyuta,sana,created) VALUES(?,?,?,?,?,?,?,?,?)",
+        (mijoz_id, nom, float(narx or 0), float(dona or 1), eni, boyi, val,
          str(sana or today_tk())[:10], now_tk().isoformat()))
     con.commit()
     rid = cur.lastrowid
@@ -134,10 +139,11 @@ def mahsulot_ochir(rid):
     con.close()
 
 
-def tolov_qosh(mijoz_id, summa, sana=None, izoh=None):
+def tolov_qosh(mijoz_id, summa, sana=None, izoh=None, valyuta="usd"):
     con = _con()
-    cur = con.execute("INSERT INTO tolovlar(mijoz_id,summa,sana,izoh,created) VALUES(?,?,?,?,?)",
-                      (mijoz_id, float(summa or 0), str(sana or today_tk())[:10], izoh, now_tk().isoformat()))
+    val = "som" if str(valyuta).lower() in ("som", "so'm", "uzs") else "usd"
+    cur = con.execute("INSERT INTO tolovlar(mijoz_id,summa,sana,izoh,valyuta,created) VALUES(?,?,?,?,?,?)",
+                      (mijoz_id, float(summa or 0), str(sana or today_tk())[:10], izoh, val, now_tk().isoformat()))
     con.commit()
     rid = cur.lastrowid
     con.close()
@@ -167,7 +173,7 @@ def tolovlar_of(mid):
 
 
 def mijoz_hisob(mid):
-    """Bitta mijozning to'liq holati: mahsulotlar, to'lovlar, jami, to'langan, qarz."""
+    """Bitta mijozning holati — valyuta bo'yicha ($ va so'm alohida)."""
     m = mijoz_get(mid)
     if not m:
         return None
@@ -175,34 +181,48 @@ def mijoz_hisob(mid):
     tolovlar = tolovlar_of(mid)
     for r in mahs:
         r["jami"] = round((r.get("narx") or 0) * (r.get("dona") or 1))
-    jami = sum(r["jami"] for r in mahs)
-    tolangan = sum(t.get("summa") or 0 for t in tolovlar)
+        r["valyuta"] = r.get("valyuta") or "usd"
+    for t in tolovlar:
+        t["valyuta"] = t.get("valyuta") or "usd"
+    val = {"usd": {"jami": 0, "tolangan": 0, "qarz": 0},
+           "som": {"jami": 0, "tolangan": 0, "qarz": 0}}
+    for r in mahs:
+        val[r["valyuta"]]["jami"] += r["jami"]
+    for t in tolovlar:
+        val[t["valyuta"]]["tolangan"] += round(t.get("summa") or 0)
+    for v in val.values():
+        v["qarz"] = round(v["jami"] - v["tolangan"])
     return {
         "id": m["id"], "ism": m["ism"], "tel": m.get("tel"), "izoh": m.get("izoh"),
         "mahsulotlar": mahs, "tolovlar": tolovlar,
-        "jami": round(jami), "tolangan": round(tolangan), "qarz": round(jami - tolangan),
+        "usd": val["usd"], "som": val["som"],
+        # eski moslik (asosan usd):
+        "jami": val["usd"]["jami"], "tolangan": val["usd"]["tolangan"], "qarz": val["usd"]["qarz"],
     }
 
 
 def mijozlar():
-    """Barcha mijozlar — qarzi bilan (ro'yxat uchun)."""
+    """Barcha mijozlar — qarzi bilan (valyuta bo'yicha $ va so'm)."""
     con = _con()
     rows = con.execute("""
         SELECT m.id, m.ism, m.tel,
-          COALESCE((SELECT SUM(narx*dona) FROM mahsulotlar WHERE mijoz_id=m.id),0) AS jami,
-          COALESCE((SELECT SUM(summa) FROM tolovlar WHERE mijoz_id=m.id),0) AS tolangan
+          COALESCE((SELECT SUM(narx*dona) FROM mahsulotlar WHERE mijoz_id=m.id AND COALESCE(valyuta,'usd')='usd'),0) AS jami_usd,
+          COALESCE((SELECT SUM(summa)     FROM tolovlar    WHERE mijoz_id=m.id AND COALESCE(valyuta,'usd')='usd'),0) AS tol_usd,
+          COALESCE((SELECT SUM(narx*dona) FROM mahsulotlar WHERE mijoz_id=m.id AND valyuta='som'),0) AS jami_som,
+          COALESCE((SELECT SUM(summa)     FROM tolovlar    WHERE mijoz_id=m.id AND valyuta='som'),0) AS tol_som
         FROM mijozlar m ORDER BY m.id DESC""").fetchall()
     con.close()
     out = []
     for r in rows:
         d = dict(r)
-        d["qarz"] = round((d["jami"] or 0) - (d["tolangan"] or 0))
-        d["jami"] = round(d["jami"] or 0)
-        d["tolangan"] = round(d["tolangan"] or 0)
-        out.append(d)
+        qu = round((d["jami_usd"] or 0) - (d["tol_usd"] or 0))
+        qs = round((d["jami_som"] or 0) - (d["tol_som"] or 0))
+        out.append({"id": d["id"], "ism": d["ism"], "tel": d["tel"],
+                    "qarz_usd": qu, "qarz_som": qs,
+                    "qarz": qu, "jami": round(d["jami_usd"] or 0), "tolangan": round(d["tol_usd"] or 0)})
     return out
 
 
 def qarzdorlar():
-    """Qarzi bor mijozlar (ko'pdan kamga)."""
-    return [m for m in mijozlar() if m["qarz"] > 0]
+    """Qarzi bor mijozlar ($ yoki so'm bo'yicha)."""
+    return [m for m in mijozlar() if (m.get("qarz_usd") or 0) > 0 or (m.get("qarz_som") or 0) > 0]

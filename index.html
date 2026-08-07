@@ -66,6 +66,7 @@ function tick(){ const d=new Date(); document.getElementById('clock').textConten
 tick(); setInterval(tick,30000);
 
 const som=n=>{ n=Math.round(Number(n)||0); return n.toLocaleString('ru-RU').replace(/,/g,' '); };
+const val=(n,v)=>((v==='som')?(som(n)+" so'm"):("$"+som(n)));
 const esc=s=>(s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const bugun=new Date().toISOString().slice(0,10);
 let _view='mijozlar';
@@ -99,11 +100,14 @@ async function loadList(){
   h+='<input class="f" id="qidir" placeholder="🔍 Qidirish — ism yoki tel" oninput="filt()" style="margin-bottom:12px">';
   if(!list.length){ h+='<div class="empty">Hozircha mijoz yo\'q.<br>Pastdagi ＋ tugma bilan qo\'shing.</div>'; app.innerHTML=h; return; }
   h+='<div id="mlist">'+list.map(m=>{
-    const q=m.qarz||0;
+    const qu=m.qarz_usd||0, qs=m.qarz_som||0;
+    let pills='';
+    if(qu||(!qu&&!qs)) pills+='<div class="'+(qu>0?'pill red':'pill')+'">$'+som(qu)+'</div>';
+    if(qs) pills+='<div class="'+(qs>0?'pill red':'pill')+'" style="margin-top:3px">'+som(qs)+' so\'m</div>';
     return '<div class="card mitem" data-nom="'+esc((m.ism||'').toLowerCase())+' '+esc(m.tel||'')+'" onclick="openMijoz('+m.id+')" style="cursor:pointer;margin-bottom:10px">'
       +'<div class="row" style="justify-content:space-between">'
       +'<div><div class="mnom">'+esc(m.ism||'—')+'</div><div class="msub">'+esc(m.tel||'')+'</div></div>'
-      +'<div style="text-align:right"><div class="'+(q>0?'pill red':'pill')+'">'+som(q)+' so\'m</div></div></div></div>';
+      +'<div style="text-align:right">'+pills+'</div></div></div>';
   }).join('')+'</div>';
   app.innerHTML=h;
 }
@@ -112,8 +116,12 @@ function wideTgl(){
   const on=!document.body.classList.contains('wide');
   document.body.classList.toggle('wide',on);
   const b=document.getElementById('fsb'); if(b) b.textContent=on?'⤡':'⛶';
-  try{ if(on&&document.documentElement.requestFullscreen) document.documentElement.requestFullscreen();
-       else if(!on&&document.exitFullscreen) document.exitFullscreen(); }catch(e){}
+  try{
+    if(tg){ if(on){ tg.expand&&tg.expand(); tg.requestFullscreen&&tg.requestFullscreen(); }
+            else { tg.exitFullscreen&&tg.exitFullscreen(); } }
+    if(on&&document.documentElement.requestFullscreen) document.documentElement.requestFullscreen();
+    else if(!on&&document.exitFullscreen) document.exitFullscreen();
+  }catch(e){}
 }
 function filt(){ const t=(document.getElementById('qidir').value||'').toLowerCase();
   document.querySelectorAll('#mlist .mitem').forEach(el=>{ el.style.display=(el.dataset.nom.indexOf(t)>=0)?'block':'none'; }); }
@@ -127,20 +135,27 @@ async function openMijoz(id){
   try{ d=await api('/api/mijoz?id='+id); }
   catch(e){ app.innerHTML='<div class="card"><div class="hint">'+esc(e.message)+'</div></div>'; return; }
   window._m=d;
-  const q=d.qarz||0;
+  const U=d.usd||{jami:0,tolangan:0,qarz:0}, S=d.som||{jami:0,tolangan:0,qarz:0};
+  const hasU=(U.jami||U.tolangan), hasS=(S.jami||S.tolangan);
+  const okAll=((U.qarz||0)<=0 && (S.qarz||0)<=0);
   let h='<span class="back" onclick="loadList()">‹ Orqaga</span>';
   h+='<div class="row" style="justify-content:space-between;margin-bottom:6px">'
    +'<div><div class="msub">MIJOZ · '+esc(d.tel||'—')+'</div><div style="font-size:22px;font-weight:800">'+esc(d.ism||'—')+'</div></div>'
    +'<button class="mini" onclick="mijozTahrirOyna()">✏️ Tahrir</button></div>';
-  h+='<div class="hero '+(q>0?'':'ok')+'"><div class="lbl">Qolgan qarzi</div><div class="big">'+som(q)+' <span style="font-size:16px">so\'m</span></div>'
-   +'<div style="opacity:.85;font-size:13px;margin-top:4px">Jami: '+som(d.jami)+' · To\'langan: '+som(d.tolangan)+'</div></div>';
+  h+='<div class="hero '+(okAll?'ok':'')+'"><div class="lbl">Qolgan qarzi</div>';
+  if(hasU || !hasS) h+='<div class="big">$'+som(U.qarz||0)+'</div>';
+  if(hasS) h+='<div class="big" style="font-size:26px;margin-top:'+((hasU||!hasS)?'2px':'0')+'">'+som(S.qarz||0)+' <span style="font-size:14px">so\'m</span></div>';
+  h+='<div style="opacity:.85;font-size:12.5px;margin-top:6px">';
+  if(hasU || !hasS) h+='$: jami $'+som(U.jami)+' · to\'langan $'+som(U.tolangan);
+  if(hasS) h+=(hasU?'<br>':'')+'so\'m: jami '+som(S.jami)+' · to\'langan '+som(S.tolangan);
+  h+='</div></div>';
 
   // Mahsulot qo'shish
   h+='<div class="card"><div class="t">➕ Mahsulot qo\'shish</div>'
    +'<input class="f" id="p_nom" placeholder="Nomi (masalan: Darvoza)" style="margin-bottom:8px" oninput="_kvHisob()">'
    +'<div class="hint" style="font-size:12px;margin-bottom:5px">📐 Kvadrat uchun eni × bo\'yi (metr) yozing. Oddiy sotuv uchun bo\'sh qoldiring.</div>'
    +'<div class="row" style="margin-bottom:8px"><input class="f" id="p_eni" inputmode="decimal" placeholder="Eni (m)" oninput="_kvHisob()"><span style="align-self:center;font-weight:700">×</span><input class="f" id="p_boyi" inputmode="decimal" placeholder="Bo\'yi (m)" oninput="_kvHisob()"></div>'
-   +'<div class="row" style="margin-bottom:6px"><input class="f" id="p_narx" inputmode="numeric" placeholder="Narx (1 m² yoki dona)" oninput="_kvHisob()"><input class="f" id="p_dona" inputmode="numeric" placeholder="Dona" value="1" style="max-width:90px" oninput="_kvHisob()"></div>'
+   +'<div class="row" style="margin-bottom:6px"><input class="f" id="p_narx" inputmode="numeric" placeholder="Narx (1 m² yoki dona)" oninput="_kvHisob()"><select class="f" id="p_val" onchange="_kvHisob()" style="max-width:82px"><option value="usd">$</option><option value="som">so\'m</option></select><input class="f" id="p_dona" inputmode="numeric" placeholder="Dona" value="1" style="max-width:72px" oninput="_kvHisob()"></div>'
    +'<div id="p_hisob" style="font-weight:700;color:var(--brand2);min-height:20px;margin-bottom:8px"></div>'
    +'<button class="btn" style="width:100%" onclick="mahsulotQosh('+id+')">Qo\'shish</button></div>';
 
@@ -148,22 +163,23 @@ async function openMijoz(id){
   h+='<div class="card"><div class="t">📦 Mahsulotlar</div>';
   if(!d.mahsulotlar.length){ h+='<div class="hint">Hali mahsulot yo\'q.</div>'; }
   else{ h+=d.mahsulotlar.map(r=>{
-      const olcham=(r.eni&&r.boyi)?(''+(+r.eni)+'×'+(+r.boyi)+' = '+(+r.dona)+' m² × '+som(r.narx)):(som(r.narx)+' so\'m'+((r.dona&&r.dona!=1)?(' × '+(+r.dona)):''));
+      const vv=r.valyuta||'usd';
+      const olcham=(r.eni&&r.boyi)?(''+(+r.eni)+'×'+(+r.boyi)+' = '+(+r.dona)+' m² × '+val(r.narx,vv)):(val(r.narx,vv)+((r.dona&&r.dona!=1)?(' × '+(+r.dona)):''));
       return '<div class="mrow"><div><div class="mnom">'+esc(r.nom)+'</div>'
       +'<div class="msub">'+olcham+' · '+esc((r.sana||'').slice(0,10))+'</div></div>'
-      +'<div class="row"><div class="pill">'+som(r.jami)+'</div><span class="x" onclick="mahsulotOchir('+r.id+','+id+')">✕</span></div></div>';
+      +'<div class="row"><div class="pill">'+val(r.jami,vv)+'</div><span class="x" onclick="mahsulotOchir('+r.id+','+id+')">✕</span></div></div>';
     }).join(''); }
   h+='</div>';
 
   // To'lov qo'shish
   h+='<div class="card"><div class="t">💵 To\'lov qo\'shish</div>'
-   +'<div class="row"><input class="f" id="t_summa" inputmode="numeric" placeholder="Summa (so\'m)">'
+   +'<div class="row"><input class="f" id="t_summa" inputmode="numeric" placeholder="Summa"><select class="f" id="t_val" style="max-width:82px"><option value="usd">$</option><option value="som">so\'m</option></select>'
    +'<button class="btn" onclick="tolovQosh('+id+')">➕</button></div>'
-   +'<div class="hint" style="margin-top:6px">To\'lov qarzdan ayiriladi.</div></div>';
+   +'<div class="hint" style="margin-top:6px">To\'lov shu valyutadagi qarzdan ayiriladi.</div></div>';
 
   // To'lovlar ro'yxati
   if(d.tolovlar.length){
-    h+='<div class="card"><div class="t">🧾 To\'lovlar</div>'+d.tolovlar.map(t=>'<div class="mrow"><div><div class="mnom">'+som(t.summa)+' so\'m</div>'
+    h+='<div class="card"><div class="t">🧾 To\'lovlar</div>'+d.tolovlar.map(t=>'<div class="mrow"><div><div class="mnom">'+val(t.summa,t.valyuta||'usd')+'</div>'
       +'<div class="msub">'+esc((t.sana||'').slice(0,10))+(t.izoh?(' · '+esc(t.izoh)):'')+'</div></div>'
       +'<span class="x" onclick="tolovOchir('+t.id+','+id+')">✕</span></div>').join('')+'</div>';
   }
@@ -175,9 +191,10 @@ async function openMijoz(id){
 function _kvHisob(){
   const g=x=>parseFloat((((document.getElementById(x)||{}).value)||'').replace(/\s/g,''))||0;
   const eni=g('p_eni'), boyi=g('p_boyi'), narx=g('p_narx'), dona=g('p_dona')||1;
+  const vv=((document.getElementById('p_val')||{}).value)||'usd';
   const el=document.getElementById('p_hisob'); if(!el)return;
-  if(eni>0&&boyi>0){ const kv=Math.round(eni*boyi*1000)/1000; el.textContent='📐 '+eni+' × '+boyi+' = '+kv+' m²  ×  '+som(narx)+'  =  '+som(kv*narx); }
-  else if(narx>0){ el.textContent='Jami: '+som(narx*dona); }
+  if(eni>0&&boyi>0){ const kv=Math.round(eni*boyi*1000)/1000; el.textContent='📐 '+eni+' × '+boyi+' = '+kv+' m²  ×  '+val(narx,vv)+'  =  '+val(kv*narx,vv); }
+  else if(narx>0){ el.textContent='Jami: '+val(narx*dona,vv); }
   else el.textContent='';
 }
 async function mahsulotQosh(id){
@@ -186,9 +203,12 @@ async function mahsulotQosh(id){
   const dona=(document.getElementById('p_dona').value||'1').trim();
   const eni=(document.getElementById('p_eni').value||'').trim();
   const boyi=(document.getElementById('p_boyi').value||'').trim();
+  const valyuta=((document.getElementById('p_val')||{}).value)||'usd';
   if(!nom){ toast('Nom yozing'); return; }
-  try{ await api('/api/mahsulot_qosh',{method:'POST',body:JSON.stringify({mijoz_id:id,nom,narx,dona,eni,boyi,sana:bugun})}); toast('✅ Qo\'shildi'); openMijoz(id); }
-  catch(e){ toast('❌ '+e.message); }
+  try{ await api('/api/mahsulot_qosh',{method:'POST',body:JSON.stringify({mijoz_id:id,nom,narx,dona,eni,boyi,valyuta,sana:bugun})});
+    toast('✅ Qo\'shildi'); openMijoz(id);
+    setTimeout(()=>{ const n=document.getElementById('p_nom'); if(n) n.focus(); },250);
+  }catch(e){ toast('❌ '+e.message); }
 }
 async function mahsulotOchir(rid,id){
   if(!await tasdiq('Bu mahsulotni o\'chirasizmi?')) return;
@@ -196,8 +216,9 @@ async function mahsulotOchir(rid,id){
 }
 async function tolovQosh(id){
   const s=(document.getElementById('t_summa').value||'').trim();
+  const valyuta=((document.getElementById('t_val')||{}).value)||'usd';
   if(!s){ toast('Summa yozing'); return; }
-  try{ await api('/api/tolov_qosh',{method:'POST',body:JSON.stringify({mijoz_id:id,summa:s,sana:bugun})}); toast('✅ To\'lov qo\'shildi'); openMijoz(id); }
+  try{ await api('/api/tolov_qosh',{method:'POST',body:JSON.stringify({mijoz_id:id,summa:s,valyuta,sana:bugun})}); toast('✅ To\'lov qo\'shildi'); openMijoz(id); }
   catch(e){ toast('❌ '+e.message); }
 }
 async function tolovOchir(rid,id){
