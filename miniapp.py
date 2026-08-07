@@ -60,7 +60,11 @@ def validate_init_data(init_data, bot_token):
 
 
 def _allowed(uid):
-    return (not ADMINS) or (uid in ADMINS)
+    if uid in ADMINS:
+        return True
+    if db.OWNER_ID:            # ega belgilangan — faqat ruxsat berilganlar
+        return db.ruxsat_bormi(uid)
+    return not ADMINS         # ega yo'q va admin yo'q — ochiq (eski holat)
 
 
 def make_web_app(bot_token):

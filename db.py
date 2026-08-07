@@ -18,6 +18,10 @@ except Exception:
     _TZ = None
 
 DATA_DIR = os.getenv("DATA_DIR", "/data")
+try:
+    OWNER_ID = int(os.getenv("OWNER_ID", "0") or "0")
+except Exception:
+    OWNER_ID = 0
 DB_PATH = os.path.join(DATA_DIR, "kovka.db")
 
 
@@ -64,6 +68,10 @@ def init_db():
         con.execute("ALTER TABLE tolovlar ADD COLUMN valyuta TEXT DEFAULT 'usd'")
     except Exception:
         pass
+    con.execute("""CREATE TABLE IF NOT EXISTS ruxsat(
+        uid INTEGER PRIMARY KEY, ism TEXT, qoshildi TEXT)""")
+    con.execute("""CREATE TABLE IF NOT EXISTS ruxsat_sorov(
+        uid INTEGER PRIMARY KEY, ism TEXT, sana TEXT)""")
     con.commit()
     con.close()
 
@@ -226,3 +234,58 @@ def mijozlar():
 def qarzdorlar():
     """Qarzi bor mijozlar ($ yoki so'm bo'yicha)."""
     return [m for m in mijozlar() if (m.get("qarz_usd") or 0) > 0 or (m.get("qarz_som") or 0) > 0]
+
+
+# ---------------- Ruxsat (kirish nazorati) ----------------
+def ruxsat_bormi(uid):
+    try:
+        uid = int(uid)
+    except Exception:
+        return False
+    if OWNER_ID and uid == OWNER_ID:
+        return True
+    con = _con()
+    r = con.execute("SELECT 1 FROM ruxsat WHERE uid=?", (uid,)).fetchone()
+    con.close()
+    return bool(r)
+
+
+def ruxsat_qosh(uid, ism=None):
+    con = _con()
+    con.execute("INSERT OR REPLACE INTO ruxsat(uid,ism,qoshildi) VALUES(?,?,?)",
+                (int(uid), ism, now_tk().isoformat()))
+    con.execute("DELETE FROM ruxsat_sorov WHERE uid=?", (int(uid),))
+    con.commit()
+    con.close()
+
+
+def ruxsat_ochir(uid):
+    con = _con()
+    con.execute("DELETE FROM ruxsat WHERE uid=?", (int(uid),))
+    con.commit()
+    con.close()
+
+
+def sorov_qosh(uid, ism=None):
+    """So'rov qo'shadi. Yangi bo'lsa True (takror bo'lsa False)."""
+    con = _con()
+    ex = con.execute("SELECT 1 FROM ruxsat_sorov WHERE uid=?", (int(uid),)).fetchone()
+    con.execute("INSERT OR REPLACE INTO ruxsat_sorov(uid,ism,sana) VALUES(?,?,?)",
+                (int(uid), ism, now_tk().isoformat()))
+    con.commit()
+    con.close()
+    return not ex
+
+
+def sorov_ochir(uid):
+    con = _con()
+    con.execute("DELETE FROM ruxsat_sorov WHERE uid=?", (int(uid),))
+    con.commit()
+    con.close()
+
+
+def ruxsatlilar():
+    con = _con()
+    rows = con.execute("SELECT * FROM ruxsat ORDER BY qoshildi").fetchall()
+    con.close()
+    return [dict(r) for r in rows]
