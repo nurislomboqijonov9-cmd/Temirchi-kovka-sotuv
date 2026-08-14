@@ -2,6 +2,7 @@
 import os
 import asyncio
 import logging
+from datetime import timedelta
 
 from aiohttp import web as aioweb
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, MenuButtonWebApp, WebAppInfo
@@ -15,6 +16,8 @@ log = logging.getLogger("kovka")
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 OWNER_ID = db.OWNER_ID
+XUSAN_ID = 2088026663          # Xusan aka (pul yig'uvchi) — eslatma unga ham boradi
+ESLATMA_SOAT = 9              # ertalab soat (Toshkent vaqti)
 
 
 def webapp_url():
@@ -125,6 +128,74 @@ async def ochir_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"🗑 Ruxsat olib tashlandi: `{uid}`", parse_mode="Markdown")
 
 
+def _pul(m):
+    """Mijoz qarzini matn qilib beradi ($ va so'm)."""
+    q = []
+    qu = m.get("qarz_usd") or 0
+    qs = m.get("qarz_som") or 0
+    if qu > 0:
+        q.append("$" + f"{qu:,}".replace(",", " "))
+    if qs > 0:
+        q.append(f"{qs:,}".replace(",", " ") + " so'm")
+    return " · ".join(q) if q else "—"
+
+
+def _vada_matn(ro):
+    """Bugungi muddat ro'yxatini xabar matniga aylantiradi."""
+    if not ro:
+        return None
+    lines = ["🔔 *Bugun to'lov muddati tugadi:*\n"]
+    for m in ro:
+        tel = m.get("tel") or "—"
+        lines.append(f"👤 *{m['ism']}* — {tel}\n   💰 Qarz: {_pul(m)}")
+    lines.append(f"\n📋 Jami: {len(ro)} ta mijoz")
+    return "\n".join(lines)
+
+
+async def _vada_yubor(bot):
+    """Bugungi muddatni ega + Xusan akaga yuboradi."""
+    matn = _vada_matn(db.muddati_bugun())
+    if not matn:
+        log.info("bugun muddati tugagan qarzdor yo'q")
+        return
+    for uid in {OWNER_ID, XUSAN_ID}:
+        if not uid:
+            continue
+        try:
+            await bot.send_message(uid, matn, parse_mode="Markdown")
+        except Exception:
+            log.exception("vada eslatmasi yuborilmadi: %s", uid)
+
+
+async def eslatma_loop(app):
+    """Har kuni Toshkent vaqti bilan ESLATMA_SOAT (9:00) da ishlaydi."""
+    while True:
+        now = db.now_tk()
+        keyingi = now.replace(hour=ESLATMA_SOAT, minute=0, second=0, microsecond=0)
+        if keyingi <= now:
+            keyingi += timedelta(days=1)
+        kutish = (keyingi - now).total_seconds()
+        log.info("Vada eslatmasi: keyingi %s (%.0f soniya)", keyingi, kutish)
+        await asyncio.sleep(kutish)
+        try:
+            await _vada_yubor(app.bot)
+        except Exception:
+            log.exception("eslatma_loop xato")
+        await asyncio.sleep(70)   # o'sha daqiqada takror ishlamasin
+
+
+async def vada_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """/vada — ega yoki Xusan aka bugungi muddat ro'yxatini qo'lda so'raydi."""
+    uid = update.effective_user.id
+    if uid != OWNER_ID and uid != XUSAN_ID:
+        return
+    matn = _vada_matn(db.muddati_bugun())
+    if not matn:
+        await update.message.reply_text("✅ Bugun muddati tugagan qarzdor yo'q.")
+        return
+    await update.message.reply_text(matn, parse_mode="Markdown")
+
+
 async def on_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
@@ -155,6 +226,7 @@ async def run():
     app.add_handler(CommandHandler("adminlar", adminlar))
     app.add_handler(CommandHandler("ruxsat", ruxsat_cmd))
     app.add_handler(CommandHandler("ochir", ochir_cmd))
+    app.add_handler(CommandHandler("vada", vada_cmd))
     app.add_handler(CallbackQueryHandler(on_cb))
 
     port = int(os.getenv("PORT", "8080"))
@@ -175,6 +247,7 @@ async def run():
             log.exception("menyu tugmasi")
 
     await app.updater.start_polling()
+    asyncio.create_task(eslatma_loop(app))     # vada eslatmasi (har kuni 9:00)
     log.info("Kovka boti + Mini App ishga tushdi (port %s)", port)
     await asyncio.Event().wait()
 

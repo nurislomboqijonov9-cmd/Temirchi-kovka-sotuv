@@ -275,6 +275,16 @@ def qarzdorlar():
     return [m for m in mijozlar() if (m.get("qarz_usd") or 0) > 0 or (m.get("qarz_som") or 0) > 0]
 
 
+def muddati_bugun():
+    """Bugun to'lov muddati (vada) tugagan VA qarzi bor mijozlar."""
+    bugun = str(today_tk())[:10]
+    out = []
+    for m in qarzdorlar():
+        if (m.get("muddat") or "")[:10] == bugun:
+            out.append(m)
+    return out
+
+
 # ---------------- Ruxsat (kirish nazorati) ----------------
 def ruxsat_bormi(uid):
     try:
