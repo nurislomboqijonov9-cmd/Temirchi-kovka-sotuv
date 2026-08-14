@@ -24,6 +24,14 @@ except Exception:
     OWNER_ID = 0
 DB_PATH = os.path.join(DATA_DIR, "kovka.db")
 
+# ---- DOIM ADMINLAR (kodda qat'iy — baza o'chsa/deploy bo'lsa ham yo'qolmaydi) ----
+# Bu ID lar hech qachon ruxsatdan chiqmaydi, egaga so'rov yubormaydi.
+DOIM_ADMIN = {
+    2088026663,   # Xusan aka
+}
+if OWNER_ID:
+    DOIM_ADMIN.add(OWNER_ID)
+
 
 def now_tk():
     return datetime.now(_TZ).replace(tzinfo=None) if _TZ else datetime.now()
@@ -68,6 +76,16 @@ def init_db():
         con.execute("ALTER TABLE tolovlar ADD COLUMN valyuta TEXT DEFAULT 'usd'")
     except Exception:
         pass
+    try:
+        # tur: 'tolov' (haqiqiy pul) yoki 'skidka' (chegirma). Ikkalasi ham qarzni kamaytiradi.
+        con.execute("ALTER TABLE tolovlar ADD COLUMN tur TEXT DEFAULT 'tolov'")
+    except Exception:
+        pass
+    # mijozga to'lov muddati (vada) — bitta sana YYYY-MM-DD
+    try:
+        con.execute("ALTER TABLE mijozlar ADD COLUMN muddat TEXT")
+    except Exception:
+        pass
     con.execute("""CREATE TABLE IF NOT EXISTS ruxsat(
         uid INTEGER PRIMARY KEY, ism TEXT, qoshildi TEXT)""")
     con.execute("""CREATE TABLE IF NOT EXISTS ruxsat_sorov(
@@ -98,6 +116,16 @@ def mijoz_tahrir(mid, ism=None, tel=None, izoh=None):
     con = _con()
     con.execute("UPDATE mijozlar SET ism=COALESCE(?,ism), tel=COALESCE(?,tel), izoh=COALESCE(?,izoh) WHERE id=?",
                 (ism, clean_phone(tel), izoh, mid))
+    con.commit()
+    con.close()
+
+
+def mijoz_muddat(mid, muddat):
+    """To'lov muddatini (vada) o'rnatadi. Bo'sh/None yuborilsa — o'chiradi."""
+    m = (muddat or "").strip()
+    m = m[:10] if m else None
+    con = _con()
+    con.execute("UPDATE mijozlar SET muddat=? WHERE id=?", (m, mid))
     con.commit()
     con.close()
 
@@ -147,11 +175,12 @@ def mahsulot_ochir(rid):
     con.close()
 
 
-def tolov_qosh(mijoz_id, summa, sana=None, izoh=None, valyuta="usd"):
+def tolov_qosh(mijoz_id, summa, sana=None, izoh=None, valyuta="usd", tur="tolov"):
     con = _con()
     val = "som" if str(valyuta).lower() in ("som", "so'm", "uzs") else "usd"
-    cur = con.execute("INSERT INTO tolovlar(mijoz_id,summa,sana,izoh,valyuta,created) VALUES(?,?,?,?,?,?)",
-                      (mijoz_id, float(summa or 0), str(sana or today_tk())[:10], izoh, val, now_tk().isoformat()))
+    tur = "skidka" if str(tur).lower() == "skidka" else "tolov"
+    cur = con.execute("INSERT INTO tolovlar(mijoz_id,summa,sana,izoh,valyuta,tur,created) VALUES(?,?,?,?,?,?,?)",
+                      (mijoz_id, float(summa or 0), str(sana or today_tk())[:10], izoh, val, tur, now_tk().isoformat()))
     con.commit()
     rid = cur.lastrowid
     con.close()
@@ -181,7 +210,8 @@ def tolovlar_of(mid):
 
 
 def mijoz_hisob(mid):
-    """Bitta mijozning holati — valyuta bo'yicha ($ va so'm alohida)."""
+    """Bitta mijozning holati — valyuta bo'yicha ($ va so'm alohida).
+    tolangan = haqiqiy to'lov; skidka = chegirma. Qarz = jami − tolangan − skidka."""
     m = mijoz_get(mid)
     if not m:
         return None
@@ -192,16 +222,22 @@ def mijoz_hisob(mid):
         r["valyuta"] = r.get("valyuta") or "usd"
     for t in tolovlar:
         t["valyuta"] = t.get("valyuta") or "usd"
-    val = {"usd": {"jami": 0, "tolangan": 0, "qarz": 0},
-           "som": {"jami": 0, "tolangan": 0, "qarz": 0}}
+        t["tur"] = t.get("tur") or "tolov"
+    val = {"usd": {"jami": 0, "tolangan": 0, "skidka": 0, "qarz": 0},
+           "som": {"jami": 0, "tolangan": 0, "skidka": 0, "qarz": 0}}
     for r in mahs:
         val[r["valyuta"]]["jami"] += r["jami"]
     for t in tolovlar:
-        val[t["valyuta"]]["tolangan"] += round(t.get("summa") or 0)
+        s = round(t.get("summa") or 0)
+        if t["tur"] == "skidka":
+            val[t["valyuta"]]["skidka"] += s
+        else:
+            val[t["valyuta"]]["tolangan"] += s
     for v in val.values():
-        v["qarz"] = round(v["jami"] - v["tolangan"])
+        v["qarz"] = round(v["jami"] - v["tolangan"] - v["skidka"])
     return {
         "id": m["id"], "ism": m["ism"], "tel": m.get("tel"), "izoh": m.get("izoh"),
+        "muddat": m.get("muddat"),
         "mahsulotlar": mahs, "tolovlar": tolovlar,
         "usd": val["usd"], "som": val["som"],
         # eski moslik (asosan usd):
@@ -210,22 +246,25 @@ def mijoz_hisob(mid):
 
 
 def mijozlar():
-    """Barcha mijozlar — qarzi bilan (valyuta bo'yicha $ va so'm)."""
+    """Barcha mijozlar — qarzi bilan (valyuta bo'yicha $ va so'm).
+    Qarz = jami − haqiqiy to'lov − skidka."""
     con = _con()
     rows = con.execute("""
-        SELECT m.id, m.ism, m.tel,
+        SELECT m.id, m.ism, m.tel, m.muddat,
           COALESCE((SELECT SUM(narx*dona) FROM mahsulotlar WHERE mijoz_id=m.id AND COALESCE(valyuta,'usd')='usd'),0) AS jami_usd,
-          COALESCE((SELECT SUM(summa)     FROM tolovlar    WHERE mijoz_id=m.id AND COALESCE(valyuta,'usd')='usd'),0) AS tol_usd,
+          COALESCE((SELECT SUM(summa)     FROM tolovlar    WHERE mijoz_id=m.id AND COALESCE(valyuta,'usd')='usd' AND COALESCE(tur,'tolov')='tolov'),0) AS tol_usd,
+          COALESCE((SELECT SUM(summa)     FROM tolovlar    WHERE mijoz_id=m.id AND COALESCE(valyuta,'usd')='usd' AND tur='skidka'),0) AS sk_usd,
           COALESCE((SELECT SUM(narx*dona) FROM mahsulotlar WHERE mijoz_id=m.id AND valyuta='som'),0) AS jami_som,
-          COALESCE((SELECT SUM(summa)     FROM tolovlar    WHERE mijoz_id=m.id AND valyuta='som'),0) AS tol_som
+          COALESCE((SELECT SUM(summa)     FROM tolovlar    WHERE mijoz_id=m.id AND valyuta='som' AND COALESCE(tur,'tolov')='tolov'),0) AS tol_som,
+          COALESCE((SELECT SUM(summa)     FROM tolovlar    WHERE mijoz_id=m.id AND valyuta='som' AND tur='skidka'),0) AS sk_som
         FROM mijozlar m ORDER BY m.id DESC""").fetchall()
     con.close()
     out = []
     for r in rows:
         d = dict(r)
-        qu = round((d["jami_usd"] or 0) - (d["tol_usd"] or 0))
-        qs = round((d["jami_som"] or 0) - (d["tol_som"] or 0))
-        out.append({"id": d["id"], "ism": d["ism"], "tel": d["tel"],
+        qu = round((d["jami_usd"] or 0) - (d["tol_usd"] or 0) - (d["sk_usd"] or 0))
+        qs = round((d["jami_som"] or 0) - (d["tol_som"] or 0) - (d["sk_som"] or 0))
+        out.append({"id": d["id"], "ism": d["ism"], "tel": d["tel"], "muddat": d.get("muddat"),
                     "qarz_usd": qu, "qarz_som": qs,
                     "qarz": qu, "jami": round(d["jami_usd"] or 0), "tolangan": round(d["tol_usd"] or 0)})
     return out
@@ -242,6 +281,8 @@ def ruxsat_bormi(uid):
         uid = int(uid)
     except Exception:
         return False
+    if uid in DOIM_ADMIN:      # Xusan aka + ega — doim ruxsatli
+        return True
     if OWNER_ID and uid == OWNER_ID:
         return True
     con = _con()

@@ -62,6 +62,69 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             log.exception("egaga so'rov yuborilmadi")
 
 
+async def adminlar(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Ega uchun: ruxsatli xodimlar ro'yxati."""
+    if update.effective_user.id != OWNER_ID:
+        return
+    lines = ["👑 *Doim adminlar (kodda):*"]
+    for a in sorted(db.DOIM_ADMIN):
+        belgi = " (ega)" if a == OWNER_ID else (" (Xusan aka)" if a == 2088026663 else "")
+        lines.append(f"  • `{a}`{belgi}")
+    ruxsatli = db.ruxsatlilar()
+    lines.append("\n✅ *Tasdiqlangan xodimlar:*")
+    if ruxsatli:
+        for r in ruxsatli:
+            ism = r.get("ism") or "—"
+            lines.append(f"  • {ism} — `{r['uid']}`")
+    else:
+        lines.append("  (hozircha yo'q)")
+    lines.append("\n_Qo'shish:_ `/ruxsat <id> [ism]`\n_O'chirish:_ `/ochir <id>`")
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+
+async def ruxsat_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Ega: /ruxsat <id> [ism] — qo'lda ruxsat berish."""
+    if update.effective_user.id != OWNER_ID:
+        return
+    args = ctx.args or []
+    if not args:
+        await update.message.reply_text("Foydalanish: `/ruxsat <id> [ism]`", parse_mode="Markdown")
+        return
+    try:
+        uid = int(args[0])
+    except Exception:
+        await update.message.reply_text("❌ ID raqam bo'lishi kerak.")
+        return
+    ism = " ".join(args[1:]) if len(args) > 1 else None
+    db.ruxsat_qosh(uid, ism)
+    await update.message.reply_text(f"✅ Ruxsat berildi: `{uid}`" + (f" — {ism}" if ism else ""),
+                                    parse_mode="Markdown")
+    try:
+        await ctx.bot.send_message(uid, "✅ Sizga ruxsat berildi! /start bosing.")
+    except Exception:
+        pass
+
+
+async def ochir_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Ega: /ochir <id> — ruxsatni olib tashlash."""
+    if update.effective_user.id != OWNER_ID:
+        return
+    args = ctx.args or []
+    if not args:
+        await update.message.reply_text("Foydalanish: `/ochir <id>`", parse_mode="Markdown")
+        return
+    try:
+        uid = int(args[0])
+    except Exception:
+        await update.message.reply_text("❌ ID raqam bo'lishi kerak.")
+        return
+    if uid in db.DOIM_ADMIN:
+        await update.message.reply_text("⛔ Bu ID kodda 'doim admin' — o'chirib bo'lmaydi.")
+        return
+    db.ruxsat_ochir(uid)
+    await update.message.reply_text(f"🗑 Ruxsat olib tashlandi: `{uid}`", parse_mode="Markdown")
+
+
 async def on_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
@@ -89,6 +152,9 @@ async def run():
     db.init_db()
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("adminlar", adminlar))
+    app.add_handler(CommandHandler("ruxsat", ruxsat_cmd))
+    app.add_handler(CommandHandler("ochir", ochir_cmd))
     app.add_handler(CallbackQueryHandler(on_cb))
 
     port = int(os.getenv("PORT", "8080"))

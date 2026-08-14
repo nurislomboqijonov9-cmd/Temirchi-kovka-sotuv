@@ -106,9 +106,18 @@ async function loadList(){
     let pills='';
     if(qu||(!qu&&!qs)) pills+='<div class="'+(qu>0?'pill red':'pill')+'">$'+som(qu)+'</div>';
     if(qs) pills+='<div class="'+(qs>0?'pill red':'pill')+'" style="margin-top:3px">'+som(qs)+' so\'m</div>';
+    // muddat belgisi (faqat qarzi bor va muddati bor bo'lsa)
+    let mBadge='';
+    const hasQarz=(qu>0||qs>0);
+    if(m.muddat && hasQarz){
+      const kun=_kunFarq(m.muddat);
+      if(kun<0) mBadge='<div class="msub" style="color:#B23A20;font-weight:700;margin-top:2px">⏰ muddat o\'tgan</div>';
+      else if(kun===0) mBadge='<div class="msub" style="color:#B26A00;font-weight:700;margin-top:2px">🔔 bugun muddat</div>';
+      else if(kun<=2) mBadge='<div class="msub" style="color:#B26A00;font-weight:700;margin-top:2px">⚠️ '+kun+' kun qoldi</div>';
+    }
     return '<div class="card mitem" data-nom="'+esc((m.ism||'').toLowerCase())+' '+esc(m.tel||'')+'" onclick="window._listY=window.scrollY;window._openId=null;openMijoz('+m.id+')" style="cursor:pointer;margin-bottom:10px">'
       +'<div class="row" style="justify-content:space-between">'
-      +'<div><div class="mnom">'+esc(m.ism||'—')+'</div><div class="msub">'+esc(m.tel||'')+'</div></div>'
+      +'<div><div class="mnom">'+esc(m.ism||'—')+'</div><div class="msub">'+esc(m.tel||'')+'</div>'+mBadge+'</div>'
       +'<div style="text-align:right">'+pills+'</div></div></div>';
   }).join('')+'</div>';
   app.innerHTML=h;
@@ -151,9 +160,12 @@ async function openMijoz(id){
   if(hasU || !hasS) h+='<div class="big">$'+som(U.qarz||0)+'</div>';
   if(hasS) h+='<div class="big" style="font-size:26px;margin-top:'+((hasU||!hasS)?'2px':'0')+'">'+som(S.qarz||0)+' <span style="font-size:14px">so\'m</span></div>';
   h+='<div style="opacity:.85;font-size:12.5px;margin-top:6px">';
-  if(hasU || !hasS) h+='$: jami $'+som(U.jami)+' · to\'langan $'+som(U.tolangan);
-  if(hasS) h+=(hasU?'<br>':'')+'so\'m: jami '+som(S.jami)+' · to\'langan '+som(S.tolangan);
+  if(hasU || !hasS){ h+='$: jami $'+som(U.jami)+' · to\'langan $'+som(U.tolangan); if(U.skidka>0) h+=' · chegirma $'+som(U.skidka); }
+  if(hasS){ h+=(hasU?'<br>':'')+'so\'m: jami '+som(S.jami)+' · to\'langan '+som(S.tolangan); if(S.skidka>0) h+=' · chegirma '+som(S.skidka)+' so\'m'; }
   h+='</div></div>';
+
+  // Muddat (vada)
+  h+=_muddatBlok(d);
 
   // Mahsulot qo'shish
   h+='<div class="card"><div class="t">➕ Mahsulot qo\'shish</div>'
@@ -189,13 +201,22 @@ async function openMijoz(id){
   h+='<div class="card"><div class="t">💵 To\'lov qo\'shish</div>'
    +'<div class="row"><input class="f" id="t_summa" inputmode="numeric" placeholder="Summa"><select class="f" id="t_val" style="max-width:82px"><option value="usd">$</option><option value="som">so\'m</option></select>'
    +'<button class="btn" onclick="tolovQosh('+id+')">➕</button></div>'
-   +'<div class="hint" style="margin-top:6px">To\'lov shu valyutadagi qarzdan ayiriladi.</div></div>';
+   +'<div class="hint" style="margin-top:6px">To\'lov shu valyutadagi qarzdan ayiriladi.</div>'
+   +'<div style="border-top:1px solid var(--line);margin:12px 0 10px"></div>'
+   +'<div class="t" style="font-size:14px">🏷 Chegirma (skidka) berish</div>'
+   +'<div class="row"><input class="f" id="s_summa" inputmode="numeric" placeholder="Chegirma summasi"><select class="f" id="s_val" style="max-width:82px"><option value="usd">$</option><option value="som">so\'m</option></select>'
+   +'<button class="btn g" onclick="skidkaQosh('+id+')">🏷</button></div>'
+   +'<div class="hint" style="margin-top:6px">Chegirma pul emas — qarzdan ayiriladi (masalan yaxlitlash yoki kelishuv).</div></div>';
 
-  // To'lovlar ro'yxati
+  // To'lovlar / chegirmalar ro'yxati
   if(d.tolovlar.length){
-    h+='<div class="card"><div class="t">🧾 To\'lovlar</div>'+d.tolovlar.map(t=>'<div class="mrow"><div><div class="mnom">'+val(t.summa,t.valyuta||'usd')+'</div>'
-      +'<div class="msub">'+esc((t.sana||'').slice(0,10))+(t.izoh?(' · '+esc(t.izoh)):'')+'</div></div>'
-      +'<span class="x" onclick="tolovOchir('+t.id+','+id+')">✕</span></div>').join('')+'</div>';
+    h+='<div class="card"><div class="t">🧾 To\'lovlar va chegirmalar</div>'+d.tolovlar.map(t=>{
+      const isSk=(t.tur==='skidka');
+      return '<div class="mrow"><div><div class="mnom">'+(isSk?'🏷 ':'')+val(t.summa,t.valyuta||'usd')
+        +(isSk?' <span class="pill" style="background:#FFF3E0;color:#B26A00">chegirma</span>':'')+'</div>'
+        +'<div class="msub">'+esc((t.sana||'').slice(0,10))+(t.izoh?(' · '+esc(t.izoh)):'')+'</div></div>'
+        +'<span class="x" onclick="tolovOchir('+t.id+','+id+')">✕</span></div>';
+    }).join('')+'</div>';
   }
 
   h+='<button class="btn d" style="width:100%;margin-top:6px" onclick="mijozOchir('+id+')">🗑 Mijozni o\'chirish</button>';
@@ -234,6 +255,50 @@ async function tolovQosh(id){
   if(!s){ toast('Summa yozing'); return; }
   try{ await api('/api/tolov_qosh',{method:'POST',body:JSON.stringify({mijoz_id:id,summa:s,valyuta,sana:bugun})}); toast('✅ To\'lov qo\'shildi'); openMijoz(id); }
   catch(e){ toast('❌ '+e.message); }
+}
+async function skidkaQosh(id){
+  const s=(document.getElementById('s_summa').value||'').trim();
+  const valyuta=((document.getElementById('s_val')||{}).value)||'usd';
+  if(!s){ toast('Chegirma summasini yozing'); return; }
+  if(!await tasdiq('Chegirma berilsinmi? '+val(s.replace(/\s/g,''),valyuta)+' qarzdan ayiriladi.')) return;
+  try{ await api('/api/tolov_qosh',{method:'POST',body:JSON.stringify({mijoz_id:id,summa:s,valyuta,tur:'skidka',izoh:'chegirma',sana:bugun})}); toast('🏷 Chegirma berildi'); openMijoz(id); }
+  catch(e){ toast('❌ '+e.message); }
+}
+
+// ============ MUDDAT (VADA) ============
+function _muddatBlok(d){
+  const m=d.muddat;
+  if(!m){
+    return '<div class="card" style="display:flex;justify-content:space-between;align-items:center;padding:12px 14px">'
+      +'<div class="hint">📅 To\'lov muddati belgilanmagan</div>'
+      +'<button class="mini" onclick="muddatOyna('+d.id+')">Muddat qo\'yish</button></div>';
+  }
+  const today=new Date().toISOString().slice(0,10);
+  const otgan=(m<today), bugunmi=(m===today);
+  const kun=_kunFarq(m);
+  let rang, matn;
+  if(otgan){ rang='#FBE9E4;color:#B23A20'; matn='⏰ Muddat o\'tgan! ('+Math.abs(kun)+' kun oldin — '+_sanaFmt(m)+')'; }
+  else if(bugunmi){ rang='#FFF3E0;color:#B26A00'; matn='🔔 Bugun to\'lov kuni! ('+_sanaFmt(m)+')'; }
+  else if(kun<=2){ rang='#FFF3E0;color:#B26A00'; matn='⚠️ '+kun+' kun qoldi — '+_sanaFmt(m); }
+  else{ rang='var(--soft);color:var(--brand2)'; matn='📅 '+_sanaFmt(m)+' gacha ('+kun+' kun qoldi)'; }
+  return '<div class="card" style="display:flex;justify-content:space-between;align-items:center;padding:12px 14px;background:'+(otgan||bugunmi||kun<=2?'':'var(--card)')+'">'
+    +'<div style="font-weight:700;padding:4px 0;border-radius:8px;'+(otgan||bugunmi||kun<=2?('background:'+rang+';padding:6px 10px'):('color:var(--brand2)'))+'">'+matn+'</div>'
+    +'<button class="mini" onclick="muddatOyna('+d.id+')">✏️</button></div>';
+}
+function _kunFarq(sana){ const a=new Date(sana+'T00:00:00'), b=new Date(bugun+'T00:00:00'); return Math.round((a-b)/86400000); }
+function _sanaFmt(s){ try{ const p=s.split('-'); return p[2]+'.'+p[1]+'.'+p[0]; }catch(e){ return s; } }
+function muddatOyna(id){
+  const cur=(window._m&&window._m.muddat)||'';
+  const ov=_oyna('<div class="t">📅 To\'lov muddati</div>'
+    +'<div class="hint" style="margin-bottom:8px">Mijoz shu sanagacha to\'lashi kerak.</div>'
+    +'<input class="f" type="date" id="md_sana" value="'+esc(cur)+'" style="margin-bottom:8px">'
+    +'<div class="tsbtns">'
+    +(cur?'<button class="tsno" id="md_ochir">🗑 O\'chirish</button>':'<button class="tsno" onclick="this.closest(\'.tsov\').remove()">Bekor</button>')
+    +'<button class="tsyes" id="md_ok">Saqlash</button></div>');
+  ov.querySelector('#md_ok').onclick=async()=>{ const s=(ov.querySelector('#md_sana').value||'').trim(); if(!s){toast('Sana tanlang');return;}
+    try{ await api('/api/muddat',{method:'POST',body:JSON.stringify({id,muddat:s})}); ov.remove(); toast('✅ Muddat saqlandi'); openMijoz(id); }catch(e){ toast('❌ '+e.message); } };
+  const ob=ov.querySelector('#md_ochir'); if(ob) ob.onclick=async()=>{
+    try{ await api('/api/muddat',{method:'POST',body:JSON.stringify({id,muddat:''})}); ov.remove(); toast('🗑 Muddat o\'chirildi'); openMijoz(id); }catch(e){ toast('❌ '+e.message); } };
 }
 async function tolovOchir(rid,id){
   if(!await tasdiq('Bu to\'lovni o\'chirasizmi?')) return;
