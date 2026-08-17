@@ -121,7 +121,20 @@ def make_web_app(bot_token):
         if not ism:
             return web.json_response({"xato": "Ism kerak"}, status=400)
         mid = db.mijoz_qosh(ism, b.get("tel"), b.get("izoh"))
+        if b.get("muddat"):
+            db.set_muddat(mid, b.get("muddat"))
         return web.json_response({"ok": True, "id": mid})
+
+    async def api_muddat(request):
+        uid, err = check(request)
+        if err:
+            return err
+        b = await request.json()
+        try:
+            mid = int(b.get("mijoz_id") or b.get("id"))
+        except Exception:
+            return web.json_response({"xato": "id kerak"}, status=400)
+        return web.json_response(db.set_muddat(mid, b.get("sana") or b.get("muddat")))
 
     async def api_mijoz_tahrir(request):
         uid, err = check(request)
@@ -185,23 +198,9 @@ def make_web_app(bot_token):
             return web.json_response({"xato": "summa kerak"}, status=400)
         if summa == 0:
             return web.json_response({"xato": "Summa 0 bo'lmasin"}, status=400)
-        tur = "skidka" if str(b.get("tur") or "tolov").lower() == "skidka" else "tolov"
-        db.tolov_qosh(mid, summa, b.get("sana"), b.get("izoh"),
-                      valyuta=b.get("valyuta"), tur=tur)
+        db.tolov_qosh(mid, summa, b.get("sana"), b.get("izoh"), valyuta=b.get("valyuta"))
         d = db.mijoz_hisob(mid)
         return web.json_response({"ok": True, "qarz": d["qarz"] if d else 0})
-
-    async def api_muddat(request):
-        uid, err = check(request)
-        if err:
-            return err
-        b = await request.json()
-        try:
-            mid = int(b.get("id"))
-        except Exception:
-            return web.json_response({"xato": "id kerak"}, status=400)
-        db.mijoz_muddat(mid, b.get("muddat"))
-        return web.json_response({"ok": True})
 
     async def api_tolov_ochir(request):
         uid, err = check(request)
@@ -220,9 +219,9 @@ def make_web_app(bot_token):
     app.router.add_post("/api/mijoz_qosh", api_mijoz_qosh)
     app.router.add_post("/api/mijoz_tahrir", api_mijoz_tahrir)
     app.router.add_post("/api/mijoz_ochir", api_mijoz_ochir)
+    app.router.add_post("/api/muddat", api_muddat)
     app.router.add_post("/api/mahsulot_qosh", api_mahsulot_qosh)
     app.router.add_post("/api/mahsulot_ochir", api_mahsulot_ochir)
     app.router.add_post("/api/tolov_qosh", api_tolov_qosh)
     app.router.add_post("/api/tolov_ochir", api_tolov_ochir)
-    app.router.add_post("/api/muddat", api_muddat)
     return app

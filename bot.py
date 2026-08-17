@@ -188,6 +188,38 @@ async def ochir_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"✅ O'chirildi: `{uid}`", parse_mode="Markdown")
 
 
+async def muddat_loop(app):
+    """Har kuni: muddati 2 kun (yoki kamroq) qolgan mijozlar haqida ega+adminlarga xabar."""
+    import datetime as _dt
+    while True:
+        try:
+            now = db.now_tk()
+            kun = now.strftime("%Y-%m-%d")
+            if now.hour >= 9 and db.get_sozlama("muddat_oxirgi_kun") != kun:
+                db.set_sozlama("muddat_oxirgi_kun", kun)
+                lst = [x for x in db.muddat_royxati() if x["kun_qoldi"] <= 2]
+                if lst:
+                    yaqin = [x for x in lst if x["kun_qoldi"] >= 0]
+                    oshgan = [x for x in lst if x["kun_qoldi"] < 0]
+                    q = ["🗓 *Ish muddatlari — eslatma*\n"]
+                    for x in yaqin:
+                        tel = f" · {x['tel']}" if x.get("tel") else ""
+                        kq = "bugun tugaydi" if x["kun_qoldi"] == 0 else f"{x['kun_qoldi']} kun qoldi"
+                        q.append(f"🟡 *{x['ism']}*{tel} — {kq} ({x['muddat']})")
+                    for x in oshgan:
+                        tel = f" · {x['tel']}" if x.get("tel") else ""
+                        q.append(f"🔴 *{x['ism']}*{tel} — {-x['kun_qoldi']} kun oshib ketdi ({x['muddat']})")
+                    matn = "\n".join(q)
+                    for uid in _admin_royxati():
+                        try:
+                            await app.bot.send_message(uid, matn, parse_mode="Markdown")
+                        except Exception:
+                            pass
+        except Exception:
+            log.exception("muddat_loop")
+        await asyncio.sleep(60)
+
+
 async def run():
     if not BOT_TOKEN:
         raise SystemExit("BOT_TOKEN yo'q — Railway Variables'ga qo'ying.")
@@ -220,6 +252,7 @@ async def run():
             log.exception("menyu tugmasi")
 
     await app.updater.start_polling()
+    asyncio.create_task(muddat_loop(app))
     log.info("Kovka boti + Mini App ishga tushdi (port %s)", port)
     await asyncio.Event().wait()
 

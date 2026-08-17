@@ -9,7 +9,7 @@ Qarz = SUM(narx*dona) - SUM(tolovlar.summa).
 """
 import os
 import sqlite3
-from datetime import datetime
+from datetime import datetime, date
 
 try:
     from zoneinfo import ZoneInfo
@@ -52,6 +52,10 @@ def init_db():
     con.execute("""CREATE TABLE IF NOT EXISTS mijozlar(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         ism TEXT, tel TEXT, izoh TEXT, created TEXT)""")
+    try:
+        con.execute("ALTER TABLE mijozlar ADD COLUMN muddat TEXT")
+    except Exception:
+        pass
     con.execute("""CREATE TABLE IF NOT EXISTS mahsulotlar(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         mijoz_id INTEGER, nom TEXT, narx REAL, dona REAL DEFAULT 1,
@@ -204,6 +208,7 @@ def mijoz_hisob(mid):
         v["qarz"] = round(v["jami"] - v["tolangan"])
     return {
         "id": m["id"], "ism": m["ism"], "tel": m.get("tel"), "izoh": m.get("izoh"),
+        "muddat": m.get("muddat"), "kun_qoldi": _kun_qoldi(m.get("muddat")),
         "mahsulotlar": mahs, "tolovlar": tolovlar,
         "usd": val["usd"], "som": val["som"],
         # eski moslik (asosan usd):
@@ -215,7 +220,7 @@ def mijozlar():
     """Barcha mijozlar — qarzi bilan (valyuta bo'yicha $ va so'm)."""
     con = _con()
     rows = con.execute("""
-        SELECT m.id, m.ism, m.tel,
+        SELECT m.id, m.ism, m.tel, m.muddat,
           COALESCE((SELECT SUM(narx*dona) FROM mahsulotlar WHERE mijoz_id=m.id AND COALESCE(valyuta,'usd')='usd'),0) AS jami_usd,
           COALESCE((SELECT SUM(summa)     FROM tolovlar    WHERE mijoz_id=m.id AND COALESCE(valyuta,'usd')='usd'),0) AS tol_usd,
           COALESCE((SELECT SUM(narx*dona) FROM mahsulotlar WHERE mijoz_id=m.id AND valyuta='som'),0) AS jami_som,
@@ -229,6 +234,7 @@ def mijozlar():
         qs = round((d["jami_som"] or 0) - (d["tol_som"] or 0))
         out.append({"id": d["id"], "ism": d["ism"], "tel": d["tel"],
                     "qarz_usd": qu, "qarz_som": qs,
+                    "muddat": d.get("muddat"), "kun_qoldi": _kun_qoldi(d.get("muddat")),
                     "qarz": qu, "jami": round(d["jami_usd"] or 0), "tolangan": round(d["tol_usd"] or 0)})
     return out
 
@@ -339,3 +345,61 @@ def adminlar():
         rows = []
     con.close()
     return [dict(r) for r in rows]
+
+
+# ---------------- Muddat (ish bitirilishi kerak bo'lgan sana) ----------------
+def _kun_qoldi(muddat):
+    if not muddat:
+        return None
+    try:
+        d = date.fromisoformat(str(muddat)[:10])
+    except Exception:
+        return None
+    return (d - today_tk()).days
+
+
+def set_muddat(mid, sana):
+    """Mijozga ish bitirilish sanasini qo'yish/o'chirish (sana=None -> o'chirish)."""
+    con = _con()
+    con.execute("UPDATE mijozlar SET muddat=? WHERE id=?",
+                ((str(sana)[:10] if sana else None), int(mid)))
+    con.commit()
+    con.close()
+    return {"ok": True}
+
+
+def muddat_royxati():
+    """Muddati bor mijozlar — kun_qoldi bilan (kam qolgan birinchi)."""
+    con = _con()
+    rows = con.execute("SELECT id, ism, tel, muddat FROM mijozlar WHERE muddat IS NOT NULL AND muddat<>''").fetchall()
+    con.close()
+    res = []
+    for r in rows:
+        kq = _kun_qoldi(r["muddat"])
+        if kq is None:
+            continue
+        res.append({"id": r["id"], "ism": r["ism"], "tel": r["tel"],
+                    "muddat": r["muddat"], "kun_qoldi": kq})
+    res.sort(key=lambda x: x["kun_qoldi"])
+    return res
+
+
+# ---------------- Sozlama (kalit-qiymat) ----------------
+def _sozlama_jadval(con):
+    con.execute("CREATE TABLE IF NOT EXISTS sozlama(kalit TEXT PRIMARY KEY, qiymat TEXT)")
+
+
+def get_sozlama(kalit, default=None):
+    con = _con()
+    _sozlama_jadval(con)
+    r = con.execute("SELECT qiymat FROM sozlama WHERE kalit=?", (kalit,)).fetchone()
+    con.close()
+    return r["qiymat"] if r else default
+
+
+def set_sozlama(kalit, qiymat):
+    con = _con()
+    _sozlama_jadval(con)
+    con.execute("INSERT OR REPLACE INTO sozlama(kalit,qiymat) VALUES(?,?)", (kalit, str(qiymat)))
+    con.commit()
+    con.close()
