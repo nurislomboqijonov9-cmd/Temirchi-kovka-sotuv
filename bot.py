@@ -2,7 +2,6 @@
 import os
 import asyncio
 import logging
-from datetime import timedelta
 
 from aiohttp import web as aioweb
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, MenuButtonWebApp, WebAppInfo
@@ -16,8 +15,6 @@ log = logging.getLogger("kovka")
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 OWNER_ID = db.OWNER_ID
-XUSAN_ID = 2088026663          # Xusan aka (pul yig'uvchi) — eslatma unga ham boradi
-ESLATMA_SOAT = 9              # ertalab soat (Toshkent vaqti)
 
 
 def webapp_url():
@@ -56,151 +53,21 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         kb = InlineKeyboardMarkup([[
             InlineKeyboardButton("✅ Ruxsat", callback_data=f"ruxsat:{uid}"),
             InlineKeyboardButton("❌ Rad", callback_data=f"rad:{uid}")]])
-        try:
-            await ctx.bot.send_message(
-                OWNER_ID,
-                f"🔔 Yangi xodim kirmoqchi:\n\n👤 *{ism}*{uname}\n🆔 `{uid}`",
-                parse_mode="Markdown", reply_markup=kb)
-        except Exception:
-            log.exception("egaga so'rov yuborilmadi")
-
-
-async def adminlar(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """Ega uchun: ruxsatli xodimlar ro'yxati."""
-    if update.effective_user.id != OWNER_ID:
-        return
-    lines = ["👑 *Doim adminlar (kodda):*"]
-    for a in sorted(db.DOIM_ADMIN):
-        belgi = " (ega)" if a == OWNER_ID else (" (Xusan aka)" if a == 2088026663 else "")
-        lines.append(f"  • `{a}`{belgi}")
-    ruxsatli = db.ruxsatlilar()
-    lines.append("\n✅ *Tasdiqlangan xodimlar:*")
-    if ruxsatli:
-        for r in ruxsatli:
-            ism = r.get("ism") or "—"
-            lines.append(f"  • {ism} — `{r['uid']}`")
-    else:
-        lines.append("  (hozircha yo'q)")
-    lines.append("\n_Qo'shish:_ `/ruxsat <id> [ism]`\n_O'chirish:_ `/ochir <id>`")
-    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
-
-
-async def ruxsat_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """Ega: /ruxsat <id> [ism] — qo'lda ruxsat berish."""
-    if update.effective_user.id != OWNER_ID:
-        return
-    args = ctx.args or []
-    if not args:
-        await update.message.reply_text("Foydalanish: `/ruxsat <id> [ism]`", parse_mode="Markdown")
-        return
-    try:
-        uid = int(args[0])
-    except Exception:
-        await update.message.reply_text("❌ ID raqam bo'lishi kerak.")
-        return
-    ism = " ".join(args[1:]) if len(args) > 1 else None
-    db.ruxsat_qosh(uid, ism)
-    await update.message.reply_text(f"✅ Ruxsat berildi: `{uid}`" + (f" — {ism}" if ism else ""),
-                                    parse_mode="Markdown")
-    try:
-        await ctx.bot.send_message(uid, "✅ Sizga ruxsat berildi! /start bosing.")
-    except Exception:
-        pass
-
-
-async def ochir_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """Ega: /ochir <id> — ruxsatni olib tashlash."""
-    if update.effective_user.id != OWNER_ID:
-        return
-    args = ctx.args or []
-    if not args:
-        await update.message.reply_text("Foydalanish: `/ochir <id>`", parse_mode="Markdown")
-        return
-    try:
-        uid = int(args[0])
-    except Exception:
-        await update.message.reply_text("❌ ID raqam bo'lishi kerak.")
-        return
-    if uid in db.DOIM_ADMIN:
-        await update.message.reply_text("⛔ Bu ID kodda 'doim admin' — o'chirib bo'lmaydi.")
-        return
-    db.ruxsat_ochir(uid)
-    await update.message.reply_text(f"🗑 Ruxsat olib tashlandi: `{uid}`", parse_mode="Markdown")
-
-
-def _pul(m):
-    """Mijoz qarzini matn qilib beradi ($ va so'm)."""
-    q = []
-    qu = m.get("qarz_usd") or 0
-    qs = m.get("qarz_som") or 0
-    if qu > 0:
-        q.append("$" + f"{qu:,}".replace(",", " "))
-    if qs > 0:
-        q.append(f"{qs:,}".replace(",", " ") + " so'm")
-    return " · ".join(q) if q else "—"
-
-
-def _vada_matn(ro):
-    """Bugungi muddat ro'yxatini xabar matniga aylantiradi."""
-    if not ro:
-        return None
-    lines = ["🔔 *Bugun to'lov muddati tugadi:*\n"]
-    for m in ro:
-        tel = m.get("tel") or "—"
-        lines.append(f"👤 *{m['ism']}* — {tel}\n   💰 Qarz: {_pul(m)}")
-    lines.append(f"\n📋 Jami: {len(ro)} ta mijoz")
-    return "\n".join(lines)
-
-
-async def _vada_yubor(bot):
-    """Bugungi muddatni ega + Xusan akaga yuboradi."""
-    matn = _vada_matn(db.muddati_bugun())
-    if not matn:
-        log.info("bugun muddati tugagan qarzdor yo'q")
-        return
-    for uid in {OWNER_ID, XUSAN_ID}:
-        if not uid:
-            continue
-        try:
-            await bot.send_message(uid, matn, parse_mode="Markdown")
-        except Exception:
-            log.exception("vada eslatmasi yuborilmadi: %s", uid)
-
-
-async def eslatma_loop(app):
-    """Har kuni Toshkent vaqti bilan ESLATMA_SOAT (9:00) da ishlaydi."""
-    while True:
-        now = db.now_tk()
-        keyingi = now.replace(hour=ESLATMA_SOAT, minute=0, second=0, microsecond=0)
-        if keyingi <= now:
-            keyingi += timedelta(days=1)
-        kutish = (keyingi - now).total_seconds()
-        log.info("Vada eslatmasi: keyingi %s (%.0f soniya)", keyingi, kutish)
-        await asyncio.sleep(kutish)
-        try:
-            await _vada_yubor(app.bot)
-        except Exception:
-            log.exception("eslatma_loop xato")
-        await asyncio.sleep(70)   # o'sha daqiqada takror ishlamasin
-
-
-async def vada_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """/vada — ega yoki Xusan aka bugungi muddat ro'yxatini qo'lda so'raydi."""
-    uid = update.effective_user.id
-    if uid != OWNER_ID and uid != XUSAN_ID:
-        return
-    matn = _vada_matn(db.muddati_bugun())
-    if not matn:
-        await update.message.reply_text("✅ Bugun muddati tugagan qarzdor yo'q.")
-        return
-    await update.message.reply_text(matn, parse_mode="Markdown")
+        for aid in _admin_royxati():
+            try:
+                await ctx.bot.send_message(
+                    aid,
+                    f"🔔 Yangi xodim kirmoqchi:\n\n👤 *{ism}*{uname}\n🆔 `{uid}`",
+                    parse_mode="Markdown", reply_markup=kb)
+            except Exception:
+                log.exception("so'rov yuborilmadi")
 
 
 async def on_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
-    if q.from_user.id != OWNER_ID:
-        await q.answer("Faqat ega tasdiqlaydi", show_alert=True)
+    if not db.is_admin(q.from_user.id):
+        await q.answer("Faqat ega yoki admin tasdiqlaydi", show_alert=True)
         return
     data = q.data or ""
     if data.startswith("ruxsat:"):
@@ -217,16 +84,122 @@ async def on_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await q.edit_message_text(f"❌ Rad etildi: `{uid}`", parse_mode="Markdown")
 
 
+def _admin_royxati():
+    idlar = set()
+    if OWNER_ID:
+        idlar.add(OWNER_ID)
+    for a in db.adminlar():
+        idlar.add(int(a["uid"]))
+    return idlar
+
+
+# ---------- Admin boshqaruvi (faqat ega) ----------
+async def admin_qosh_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != OWNER_ID:
+        await update.message.reply_text("Faqat ega admin qo'sha oladi.")
+        return
+    args = ctx.args or []
+    if not args or not args[0].lstrip("-").isdigit():
+        await update.message.reply_text(
+            "👑 Admin qo'shish: `/admin_qosh 123456789 Xusan aka`\n"
+            "_(ID ni bilish: o'sha odam botga /start yozsin.)_", parse_mode="Markdown")
+        return
+    uid = int(args[0])
+    ism = " ".join(args[1:]).strip() or None
+    db.admin_qosh(uid, ism)
+    await update.message.reply_text(f"✅ 👑 Admin qo'shildi: *{ism or uid}* (`{uid}`)\n"
+                                    "Endi u odam qo'sha/tasdiqlay oladi.", parse_mode="Markdown")
+    try:
+        await ctx.bot.send_message(uid, "👑 Sizga *admin* huquqi berildi! /start bosing.", parse_mode="Markdown")
+    except Exception:
+        pass
+
+
+async def admin_ochir_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != OWNER_ID:
+        await update.message.reply_text("Faqat ega o'chira oladi.")
+        return
+    args = ctx.args or []
+    if not args or not args[0].lstrip("-").isdigit():
+        await update.message.reply_text("O'chirish: `/admin_ochir 123456789`", parse_mode="Markdown")
+        return
+    n = db.admin_ochir(int(args[0]))
+    await update.message.reply_text("✅ Adminlikdan olindi." if n else "❌ Bunday admin yo'q.")
+
+
+async def adminlar_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not db.is_admin(update.effective_user.id):
+        return
+    lst = db.adminlar()
+    q = [f"👑 *Adminlar*\n\n• Ega: `{OWNER_ID}`"]
+    for a in lst:
+        q.append(f"• {a.get('ism') or 'Admin'}: `{a['uid']}`")
+    q.append("\n_Qo'shish (ega):_ `/admin_qosh <id> <ism>`")
+    await update.message.reply_text("\n".join(q), parse_mode="Markdown")
+
+
+# ---------- Xodim (ruxsat) boshqaruvi — admin ----------
+async def xodimlar_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not db.is_admin(update.effective_user.id):
+        return
+    lst = db.ruxsatlilar()
+    adm = {int(a["uid"]) for a in db.adminlar()}
+    q = [f"👥 *Xodimlar (ruxsatli)* — {len(lst)} ta\n"]
+    for r in lst:
+        rol = " 👑" if int(r["uid"]) in adm else ""
+        q.append(f"• {r.get('ism') or 'Xodim'}: `{r['uid']}`{rol}")
+    q.append("\n_Qo'shish:_ `/xodim_qosh <id> <ism>` · _O'chirish:_ `/ochir <id>`")
+    await update.message.reply_text("\n".join(q), parse_mode="Markdown")
+
+
+async def xodim_qosh_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not db.is_admin(update.effective_user.id):
+        return
+    args = ctx.args or []
+    if not args or not args[0].lstrip("-").isdigit():
+        await update.message.reply_text("👤 Qo'shish: `/xodim_qosh 123456789 Ism`", parse_mode="Markdown")
+        return
+    uid = int(args[0])
+    ism = " ".join(args[1:]).strip() or None
+    db.ruxsat_qosh(uid, ism)
+    await update.message.reply_text(f"✅ Xodim qo'shildi: *{ism or uid}* (`{uid}`)", parse_mode="Markdown")
+    try:
+        await ctx.bot.send_message(uid, "✅ Sizga ruxsat berildi! /start bosing.")
+    except Exception:
+        pass
+
+
+async def ochir_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not db.is_admin(update.effective_user.id):
+        return
+    args = ctx.args or []
+    if not args or not args[0].lstrip("-").isdigit():
+        await update.message.reply_text("O'chirish: `/ochir 123456789`", parse_mode="Markdown")
+        return
+    uid = int(args[0])
+    if uid == OWNER_ID:
+        await update.message.reply_text("🔒 Egani o'chirib bo'lmaydi.")
+        return
+    if db.is_admin(uid) and update.effective_user.id != OWNER_ID:
+        await update.message.reply_text("🔒 Adminni faqat ega o'chira oladi.")
+        return
+    db.ruxsat_ochir(uid)
+    db.admin_ochir(uid)
+    await update.message.reply_text(f"✅ O'chirildi: `{uid}`", parse_mode="Markdown")
+
+
 async def run():
     if not BOT_TOKEN:
         raise SystemExit("BOT_TOKEN yo'q — Railway Variables'ga qo'ying.")
     db.init_db()
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("adminlar", adminlar))
-    app.add_handler(CommandHandler("ruxsat", ruxsat_cmd))
+    app.add_handler(CommandHandler("admin_qosh", admin_qosh_cmd))
+    app.add_handler(CommandHandler("admin_ochir", admin_ochir_cmd))
+    app.add_handler(CommandHandler("adminlar", adminlar_cmd))
+    app.add_handler(CommandHandler("xodimlar", xodimlar_cmd))
+    app.add_handler(CommandHandler("xodim_qosh", xodim_qosh_cmd))
     app.add_handler(CommandHandler("ochir", ochir_cmd))
-    app.add_handler(CommandHandler("vada", vada_cmd))
     app.add_handler(CallbackQueryHandler(on_cb))
 
     port = int(os.getenv("PORT", "8080"))
@@ -247,7 +220,6 @@ async def run():
             log.exception("menyu tugmasi")
 
     await app.updater.start_polling()
-    asyncio.create_task(eslatma_loop(app))     # vada eslatmasi (har kuni 9:00)
     log.info("Kovka boti + Mini App ishga tushdi (port %s)", port)
     await asyncio.Event().wait()
 
