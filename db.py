@@ -1,405 +1,459 @@
-"""
-KOVKA boti — sotuv/qarz bazasi (ijaradan farqli: kunlik hisob, ombor, qaytarish YO'Q).
+import sqlite3, os, time, threading, math, secrets
+from datetime import datetime, timedelta, timezone
 
-Model:
-  mijozlar    : id, ism, tel, izoh
-  mahsulotlar : id, mijoz_id, nom, narx, dona, sana   (satr = narx * dona)
-  tolovlar    : id, mijoz_id, summa, sana, izoh
-Qarz = SUM(narx*dona) - SUM(tolovlar.summa).
-"""
-import os
-import sqlite3
-from datetime import datetime, date
+DATA_DIR = os.environ.get("DATA_DIR", "/data")
+if not os.path.isdir(DATA_DIR):
+    # lokal sinov uchun
+    DATA_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(DATA_DIR, "moshina.db")
 
-try:
-    from zoneinfo import ZoneInfo
-    _TZ = ZoneInfo(os.getenv("TZ", "Asia/Tashkent"))
-except Exception:
-    _TZ = None
+TZ = timezone(timedelta(hours=5))  # Asia/Tashkent
+def now_tk(): return datetime.now(TZ)
+def today_tk(): return now_tk().date()
 
-DATA_DIR = os.getenv("DATA_DIR", "/data")
-try:
-    OWNER_ID = int(os.getenv("OWNER_ID", "0") or "0")
-except Exception:
-    OWNER_ID = 0
-DB_PATH = os.path.join(DATA_DIR, "kovka.db")
+_lock = threading.Lock()
 
-
-def now_tk():
-    return datetime.now(_TZ).replace(tzinfo=None) if _TZ else datetime.now()
-
-
-def today_tk():
-    return now_tk().date()
-
-
-def clean_phone(t):
-    if not t:
-        return None
-    d = "".join(c for c in str(t) if c.isdigit())
-    return d or None
-
-
-def _con():
-    os.makedirs(DATA_DIR, exist_ok=True)
-    con = sqlite3.connect(DB_PATH)
-    con.row_factory = sqlite3.Row
-    return con
-
+def _conn():
+    c = sqlite3.connect(DB_PATH, timeout=30)
+    c.row_factory = sqlite3.Row
+    c.execute("PRAGMA journal_mode=WAL")
+    return c
 
 def init_db():
-    con = _con()
-    con.execute("""CREATE TABLE IF NOT EXISTS mijozlar(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        ism TEXT, tel TEXT, izoh TEXT, created TEXT)""")
-    try:
-        con.execute("ALTER TABLE mijozlar ADD COLUMN muddat TEXT")
-    except Exception:
-        pass
-    con.execute("""CREATE TABLE IF NOT EXISTS mahsulotlar(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        mijoz_id INTEGER, nom TEXT, narx REAL, dona REAL DEFAULT 1,
-        sana TEXT, created TEXT)""")
-    for col in ("eni REAL", "boyi REAL", "valyuta TEXT DEFAULT 'usd'"):
+    with _lock, _conn() as c:
+        # foydalanuvchilar (ega tasdiqlaydi)
+        c.execute("""CREATE TABLE IF NOT EXISTS users(
+            tg_id INTEGER PRIMARY KEY,
+            name TEXT,
+            role TEXT DEFAULT 'kutilmoqda',   -- ega / haydovchi / nazoratchi / kutilmoqda / rad / nofaol
+            car_id INTEGER,                    -- haydovchi qaysi moshinada
+            prev_role TEXT,                    -- nofaol qilinganda eski rol
+            created INTEGER
+        )""")
+        # eski bazaga prev_role ustunini qo'shish (migration)
         try:
-            con.execute(f"ALTER TABLE mahsulotlar ADD COLUMN {col}")
-        except Exception:
-            pass
-    con.execute("""CREATE TABLE IF NOT EXISTS tolovlar(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        mijoz_id INTEGER, summa REAL, sana TEXT, izoh TEXT, created TEXT)""")
-    try:
-        con.execute("ALTER TABLE tolovlar ADD COLUMN valyuta TEXT DEFAULT 'usd'")
-    except Exception:
-        pass
-    con.execute("""CREATE TABLE IF NOT EXISTS ruxsat(
-        uid INTEGER PRIMARY KEY, ism TEXT, qoshildi TEXT)""")
-    con.execute("""CREATE TABLE IF NOT EXISTS ruxsat_sorov(
-        uid INTEGER PRIMARY KEY, ism TEXT, sana TEXT)""")
-    con.execute("""CREATE TABLE IF NOT EXISTS adminlar(
-        uid INTEGER PRIMARY KEY, ism TEXT, qoshildi TEXT)""")
-    con.commit()
-    con.close()
+            cols = [r[1] for r in c.execute("PRAGMA table_info(users)").fetchall()]
+            if "prev_role" not in cols:
+                c.execute("ALTER TABLE users ADD COLUMN prev_role TEXT")
+        except Exception as e:
+            print("migration prev_role:", e)
+        # moshinalar
+        c.execute("""CREATE TABLE IF NOT EXISTS cars(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT, raqam TEXT, driver TEXT,
+            olindi INTEGER DEFAULT 0,
+            sotilsa INTEGER DEFAULT 0,
+            oylik INTEGER DEFAULT 0,
+            amort INTEGER DEFAULT 50,
+            b_kirim INTEGER DEFAULT 0,
+            b_chiqim INTEGER DEFAULT 0,
+            b_oylik INTEGER DEFAULT 0,
+            b_sana TEXT
+        )""")
+        # eski cars jadvaliga boshlang'ich ustunlar (migration)
+        try:
+            ccols = [r[1] for r in c.execute("PRAGMA table_info(cars)").fetchall()]
+            for col in ["b_kirim","b_chiqim","b_oylik"]:
+                if col not in ccols:
+                    c.execute(f"ALTER TABLE cars ADD COLUMN {col} INTEGER DEFAULT 0")
+            if "b_sana" not in ccols:
+                c.execute("ALTER TABLE cars ADD COLUMN b_sana TEXT")
+        except Exception as e:
+            print("migration cars:", e)
+        # yozuvlar (yolkira/xarajat)
+        c.execute("""CREATE TABLE IF NOT EXISTS logs(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            car_id INTEGER,
+            t TEXT,           -- yolkira/gaz/ovqat/tamir/yuvish/shina/moy/shtraf/zapchast
+            amt INTEGER,
+            note TEXT,
+            pul TEXT,         -- naqd / bonus (ish qildi)
+            who TEXT,
+            who_id INTEGER,
+            ts INTEGER,
+            st TEXT DEFAULT 'wait',  -- wait/ok/no
+            rej TEXT,
+            chek INTEGER DEFAULT 0,
+            katta INTEGER DEFAULT 0,
+            chek_img TEXT
+        )""")
+        # migratsiya: eski bazaga chek_img ustuni
+        try:
+            cols = [r[1] for r in c.execute("PRAGMA table_info(logs)").fetchall()]
+            if "chek_img" not in cols:
+                c.execute("ALTER TABLE logs ADD COLUMN chek_img TEXT")
+        except Exception as e:
+            print("migr err", e)
+        # oylik/avans
+        c.execute("""CREATE TABLE IF NOT EXISTS salary(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            car_id INTEGER,
+            t TEXT,          -- oylik / avans
+            amt INTEGER,
+            note TEXT,
+            ts INTEGER
+        )""")
+        # sozlama (kurs va h.k.)
+        c.execute("""CREATE TABLE IF NOT EXISTS settings(
+            k TEXT PRIMARY KEY, v TEXT
+        )""")
+        # ===== GPS: haydovchi joylashuvi (car_id bo'yicha) =====
+        c.execute("""CREATE TABLE IF NOT EXISTS gps_nuqta(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            car_id INTEGER, lat REAL, lon REAL, vaqt TEXT, acc REAL
+        )""")
+        c.execute("CREATE INDEX IF NOT EXISTS ix_gps ON gps_nuqta(car_id, vaqt)")
+        # GPS uchun moshinaga qo'shimcha ustunlar (kuzat tokeni, kod, last_seen)
+        try:
+            ccols2 = [r[1] for r in c.execute("PRAGMA table_info(cars)").fetchall()]
+            for col, ddl in [("kuzat_token","TEXT"),("share_token","TEXT"),
+                             ("gps_kod","TEXT"),("last_seen","TEXT"),("offline_xabar","INTEGER DEFAULT 0")]:
+                if col not in ccols2:
+                    c.execute(f"ALTER TABLE cars ADD COLUMN {col} {ddl}")
+        except Exception as e:
+            print("migration gps cars:", e)
+        # yetkazish (mijozga jonli ssilka)
+        c.execute("""CREATE TABLE IF NOT EXISTS yetkazish(
+            token TEXT PRIMARY KEY, car_id INTEGER,
+            mlat REAL, mlon REAL, izoh TEXT,
+            holat TEXT DEFAULT 'faol', created TEXT, yakun TEXT
+        )""")
+        c.commit()
 
+# ---------- users ----------
+def get_user(tg_id):
+    with _conn() as c:
+        r = c.execute("SELECT * FROM users WHERE tg_id=?", (tg_id,)).fetchone()
+        return dict(r) if r else None
 
-# ---------------- Mijoz ----------------
-def mijoz_qosh(ism, tel=None, izoh=None):
-    con = _con()
-    cur = con.execute("INSERT INTO mijozlar(ism,tel,izoh,created) VALUES(?,?,?,?)",
-                      (ism, clean_phone(tel), izoh, now_tk().isoformat()))
-    con.commit()
-    mid = cur.lastrowid
-    con.close()
-    return mid
-
-
-def mijoz_get(mid):
-    con = _con()
-    r = con.execute("SELECT * FROM mijozlar WHERE id=?", (mid,)).fetchone()
-    con.close()
-    return dict(r) if r else None
-
-
-def mijoz_tahrir(mid, ism=None, tel=None, izoh=None):
-    con = _con()
-    con.execute("UPDATE mijozlar SET ism=COALESCE(?,ism), tel=COALESCE(?,tel), izoh=COALESCE(?,izoh) WHERE id=?",
-                (ism, clean_phone(tel), izoh, mid))
-    con.commit()
-    con.close()
-
-
-def mijoz_ochir(mid):
-    con = _con()
-    con.execute("DELETE FROM mahsulotlar WHERE mijoz_id=?", (mid,))
-    con.execute("DELETE FROM tolovlar WHERE mijoz_id=?", (mid,))
-    con.execute("DELETE FROM mijozlar WHERE id=?", (mid,))
-    con.commit()
-    con.close()
-
-
-def mijoz_qidir(nom):
-    con = _con()
-    rows = con.execute("SELECT * FROM mijozlar WHERE lower(ism) LIKE ? OR tel LIKE ? ORDER BY id DESC",
-                       (f"%{(nom or '').lower()}%", f"%{clean_phone(nom) or ''}%")).fetchall()
-    con.close()
-    return [dict(r) for r in rows]
-
-
-# ---------------- Mahsulot / To'lov ----------------
-def mahsulot_qosh(mijoz_id, nom, narx, dona=1, sana=None, eni=None, boyi=None, valyuta="usd"):
-    con = _con()
-    try:
-        eni = float(eni) if eni not in (None, "") else None
-        boyi = float(boyi) if boyi not in (None, "") else None
-    except Exception:
-        eni = boyi = None
-    if eni and boyi:
-        dona = round(eni * boyi, 3)   # kvadrat = eni * bo'yi; narx = 1 m^2 narxi
-    val = "som" if str(valyuta).lower() in ("som", "so'm", "uzs") else "usd"
-    cur = con.execute(
-        "INSERT INTO mahsulotlar(mijoz_id,nom,narx,dona,eni,boyi,valyuta,sana,created) VALUES(?,?,?,?,?,?,?,?,?)",
-        (mijoz_id, nom, float(narx or 0), float(dona or 1), eni, boyi, val,
-         str(sana or today_tk())[:10], now_tk().isoformat()))
-    con.commit()
-    rid = cur.lastrowid
-    con.close()
-    return rid
-
-
-def mahsulot_ochir(rid):
-    con = _con()
-    con.execute("DELETE FROM mahsulotlar WHERE id=?", (rid,))
-    con.commit()
-    con.close()
-
-
-def tolov_qosh(mijoz_id, summa, sana=None, izoh=None, valyuta="usd"):
-    con = _con()
-    val = "som" if str(valyuta).lower() in ("som", "so'm", "uzs") else "usd"
-    cur = con.execute("INSERT INTO tolovlar(mijoz_id,summa,sana,izoh,valyuta,created) VALUES(?,?,?,?,?,?)",
-                      (mijoz_id, float(summa or 0), str(sana or today_tk())[:10], izoh, val, now_tk().isoformat()))
-    con.commit()
-    rid = cur.lastrowid
-    con.close()
-    return rid
-
-
-def tolov_ochir(rid):
-    con = _con()
-    con.execute("DELETE FROM tolovlar WHERE id=?", (rid,))
-    con.commit()
-    con.close()
-
-
-# ---------------- Hisob ----------------
-def mahsulotlar_of(mid):
-    con = _con()
-    rows = con.execute("SELECT * FROM mahsulotlar WHERE mijoz_id=? ORDER BY id DESC", (mid,)).fetchall()
-    con.close()
-    return [dict(r) for r in rows]
-
-
-def tolovlar_of(mid):
-    con = _con()
-    rows = con.execute("SELECT * FROM tolovlar WHERE mijoz_id=? ORDER BY id DESC", (mid,)).fetchall()
-    con.close()
-    return [dict(r) for r in rows]
-
-
-def mijoz_hisob(mid):
-    """Bitta mijozning holati — valyuta bo'yicha ($ va so'm alohida)."""
-    m = mijoz_get(mid)
-    if not m:
-        return None
-    mahs = mahsulotlar_of(mid)
-    tolovlar = tolovlar_of(mid)
-    for r in mahs:
-        r["jami"] = round((r.get("narx") or 0) * (r.get("dona") or 1))
-        r["valyuta"] = r.get("valyuta") or "usd"
-    for t in tolovlar:
-        t["valyuta"] = t.get("valyuta") or "usd"
-    val = {"usd": {"jami": 0, "tolangan": 0, "qarz": 0},
-           "som": {"jami": 0, "tolangan": 0, "qarz": 0}}
-    for r in mahs:
-        val[r["valyuta"]]["jami"] += r["jami"]
-    for t in tolovlar:
-        val[t["valyuta"]]["tolangan"] += round(t.get("summa") or 0)
-    for v in val.values():
-        v["qarz"] = round(v["jami"] - v["tolangan"])
-    return {
-        "id": m["id"], "ism": m["ism"], "tel": m.get("tel"), "izoh": m.get("izoh"),
-        "muddat": m.get("muddat"), "kun_qoldi": _kun_qoldi(m.get("muddat")),
-        "mahsulotlar": mahs, "tolovlar": tolovlar,
-        "usd": val["usd"], "som": val["som"],
-        # eski moslik (asosan usd):
-        "jami": val["usd"]["jami"], "tolangan": val["usd"]["tolangan"], "qarz": val["usd"]["qarz"],
-    }
-
-
-def mijozlar():
-    """Barcha mijozlar — qarzi bilan (valyuta bo'yicha $ va so'm)."""
-    con = _con()
-    rows = con.execute("""
-        SELECT m.id, m.ism, m.tel, m.muddat,
-          COALESCE((SELECT SUM(narx*dona) FROM mahsulotlar WHERE mijoz_id=m.id AND COALESCE(valyuta,'usd')='usd'),0) AS jami_usd,
-          COALESCE((SELECT SUM(summa)     FROM tolovlar    WHERE mijoz_id=m.id AND COALESCE(valyuta,'usd')='usd'),0) AS tol_usd,
-          COALESCE((SELECT SUM(narx*dona) FROM mahsulotlar WHERE mijoz_id=m.id AND valyuta='som'),0) AS jami_som,
-          COALESCE((SELECT SUM(summa)     FROM tolovlar    WHERE mijoz_id=m.id AND valyuta='som'),0) AS tol_som
-        FROM mijozlar m ORDER BY m.id DESC""").fetchall()
-    con.close()
-    out = []
-    for r in rows:
-        d = dict(r)
-        qu = round((d["jami_usd"] or 0) - (d["tol_usd"] or 0))
-        qs = round((d["jami_som"] or 0) - (d["tol_som"] or 0))
-        out.append({"id": d["id"], "ism": d["ism"], "tel": d["tel"],
-                    "qarz_usd": qu, "qarz_som": qs,
-                    "muddat": d.get("muddat"), "kun_qoldi": _kun_qoldi(d.get("muddat")),
-                    "qarz": qu, "jami": round(d["jami_usd"] or 0), "tolangan": round(d["tol_usd"] or 0)})
-    return out
-
-
-def qarzdorlar():
-    """Qarzi bor mijozlar ($ yoki so'm bo'yicha)."""
-    return [m for m in mijozlar() if (m.get("qarz_usd") or 0) > 0 or (m.get("qarz_som") or 0) > 0]
-
-
-# ---------------- Ruxsat (kirish nazorati) ----------------
-def ruxsat_bormi(uid):
-    try:
-        uid = int(uid)
-    except Exception:
+def add_pending_user(tg_id, name):
+    with _lock, _conn() as c:
+        ex = c.execute("SELECT tg_id FROM users WHERE tg_id=?", (tg_id,)).fetchone()
+        if not ex:
+            c.execute("INSERT INTO users(tg_id,name,role,created) VALUES(?,?,'kutilmoqda',?)",
+                      (tg_id, name, int(time.time())))
+            c.commit()
+            return True
         return False
-    if OWNER_ID and uid == OWNER_ID:
-        return True
-    con = _con()
-    r = con.execute("SELECT 1 FROM ruxsat WHERE uid=?", (uid,)).fetchone()
-    con.close()
-    return bool(r)
 
+def set_user_role(tg_id, role, car_id=None):
+    with _lock, _conn() as c:
+        c.execute("UPDATE users SET role=?, car_id=? WHERE tg_id=?", (role, car_id, tg_id))
+        c.commit()
 
-def ruxsat_qosh(uid, ism=None):
-    con = _con()
-    con.execute("INSERT OR REPLACE INTO ruxsat(uid,ism,qoshildi) VALUES(?,?,?)",
-                (int(uid), ism, now_tk().isoformat()))
-    con.execute("DELETE FROM ruxsat_sorov WHERE uid=?", (int(uid),))
-    con.commit()
-    con.close()
+def set_owner(tg_id):
+    with _lock, _conn() as c:
+        ex = c.execute("SELECT tg_id FROM users WHERE tg_id=?", (tg_id,)).fetchone()
+        if ex:
+            c.execute("UPDATE users SET role='ega' WHERE tg_id=?", (tg_id,))
+        else:
+            c.execute("INSERT INTO users(tg_id,name,role,created) VALUES(?,?, 'ega',?)",
+                      (tg_id, "Ega", int(time.time())))
+        c.commit()
 
+def all_users():
+    with _conn() as c:
+        return [dict(r) for r in c.execute("SELECT * FROM users ORDER BY created DESC").fetchall()]
 
-def ruxsat_ochir(uid):
-    con = _con()
-    con.execute("DELETE FROM ruxsat WHERE uid=?", (int(uid),))
-    con.commit()
-    con.close()
+def set_user_car(tg_id, car_id):
+    with _lock, _conn() as c:
+        c.execute("UPDATE users SET car_id=? WHERE tg_id=?", (car_id, tg_id))
+        c.commit()
 
+def deactivate_user(tg_id):
+    # nofaol qilish: eski rolni saqlab, 'nofaol' qo'yamiz
+    with _lock, _conn() as c:
+        r = c.execute("SELECT role FROM users WHERE tg_id=?", (tg_id,)).fetchone()
+        if r and r["role"] not in ("nofaol", "ega"):
+            c.execute("UPDATE users SET role='nofaol', prev_role=? WHERE tg_id=?", (r["role"], tg_id))
+            c.commit()
 
-def sorov_qosh(uid, ism=None):
-    """So'rov qo'shadi. Yangi bo'lsa True (takror bo'lsa False)."""
-    con = _con()
-    ex = con.execute("SELECT 1 FROM ruxsat_sorov WHERE uid=?", (int(uid),)).fetchone()
-    con.execute("INSERT OR REPLACE INTO ruxsat_sorov(uid,ism,sana) VALUES(?,?,?)",
-                (int(uid), ism, now_tk().isoformat()))
-    con.commit()
-    con.close()
-    return not ex
+def reactivate_user(tg_id):
+    # qayta tiklash: prev_role ga qaytaramiz
+    with _lock, _conn() as c:
+        r = c.execute("SELECT prev_role FROM users WHERE tg_id=?", (tg_id,)).fetchone()
+        role = (r["prev_role"] if r and r["prev_role"] else "haydovchi")
+        c.execute("UPDATE users SET role=? WHERE tg_id=?", (role, tg_id))
+        c.commit()
 
+# ---------- cars ----------
+def all_cars():
+    with _conn() as c:
+        return [dict(r) for r in c.execute("SELECT * FROM cars ORDER BY id").fetchall()]
 
-def sorov_ochir(uid):
-    con = _con()
-    con.execute("DELETE FROM ruxsat_sorov WHERE uid=?", (int(uid),))
-    con.commit()
-    con.close()
+def add_car(name, raqam, driver, olindi=0, oylik=0, amort=50):
+    with _lock, _conn() as c:
+        cur = c.execute("INSERT INTO cars(name,raqam,driver,olindi,oylik,amort) VALUES(?,?,?,?,?,?)",
+                        (name, raqam, driver, olindi, oylik, amort))
+        c.commit()
+        return cur.lastrowid
 
+def update_car(car_id, field, value):
+    if field not in ("name","raqam","driver","olindi","sotilsa","oylik","amort","b_kirim","b_chiqim","b_oylik","b_sana"):
+        return
+    with _lock, _conn() as c:
+        c.execute(f"UPDATE cars SET {field}=? WHERE id=?", (value, car_id))
+        c.commit()
 
-def ruxsatlilar():
-    con = _con()
-    rows = con.execute("SELECT * FROM ruxsat ORDER BY qoshildi").fetchall()
-    con.close()
-    return [dict(r) for r in rows]
+# ---------- logs ----------
+def add_log(car_id, t, amt, note, pul, who, who_id, st="wait", chek=0, katta=0, chek_img=None):
+    with _lock, _conn() as c:
+        cur = c.execute("""INSERT INTO logs(car_id,t,amt,note,pul,who,who_id,ts,st,chek,katta,chek_img)
+                           VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        (car_id, t, amt, note, pul, who, who_id, int(time.time()), st, chek, katta, chek_img))
+        c.commit()
+        return cur.lastrowid
 
+def delete_car(car_id):
+    with _lock, _conn() as c:
+        c.execute("DELETE FROM cars WHERE id=?", (car_id,))
+        c.commit()
 
-# ---------------- Admin (odam qo'sha oladiganlar) ----------------
-def is_admin(uid):
-    try:
-        uid = int(uid)
-    except Exception:
-        return False
-    if OWNER_ID and uid == OWNER_ID:
-        return True
-    con = _con()
-    try:
-        r = con.execute("SELECT 1 FROM adminlar WHERE uid=?", (uid,)).fetchone()
-    except Exception:
-        r = None
-    con.close()
-    return bool(r)
+def set_log_state(log_id, st, rej=None):
+    with _lock, _conn() as c:
+        c.execute("UPDATE logs SET st=?, rej=? WHERE id=?", (st, rej, log_id))
+        c.commit()
 
+def delete_log(log_id):
+    with _lock, _conn() as c:
+        c.execute("DELETE FROM logs WHERE id=?", (log_id,))
+        c.commit()
 
-def admin_qosh(uid, ism=None):
-    con = _con()
-    con.execute("INSERT OR REPLACE INTO adminlar(uid,ism,qoshildi) VALUES(?,?,?)",
-                (int(uid), ism, now_tk().isoformat()))
-    # admin ham ruxsatli bo'lsin (ilovaga kira olsin)
-    con.execute("INSERT OR REPLACE INTO ruxsat(uid,ism,qoshildi) VALUES(?,?,?)",
-                (int(uid), ism, now_tk().isoformat()))
-    con.execute("DELETE FROM ruxsat_sorov WHERE uid=?", (int(uid),))
-    con.commit()
-    con.close()
+def edit_log(log_id, amt, note, pul=None):
+    with _lock, _conn() as c:
+        if pul is not None:
+            c.execute("UPDATE logs SET amt=?, note=?, pul=? WHERE id=?", (amt, note, pul, log_id))
+        else:
+            c.execute("UPDATE logs SET amt=?, note=? WHERE id=?", (amt, note, log_id))
+        c.commit()
 
+def get_log(log_id):
+    with _conn() as c:
+        r = c.execute("SELECT * FROM logs WHERE id=?", (log_id,)).fetchone()
+        return dict(r) if r else None
 
-def admin_ochir(uid):
-    con = _con()
-    cur = con.execute("DELETE FROM adminlar WHERE uid=?", (int(uid),))
-    con.commit()
-    n = cur.rowcount
-    con.close()
+def all_logs():
+    with _conn() as c:
+        return [dict(r) for r in c.execute("SELECT * FROM logs ORDER BY ts DESC").fetchall()]
+
+def pending_logs():
+    with _conn() as c:
+        return [dict(r) for r in c.execute("SELECT * FROM logs WHERE st='wait' ORDER BY ts DESC").fetchall()]
+
+# ---------- salary ----------
+def add_salary(car_id, t, amt, note, ts=None):
+    with _lock, _conn() as c:
+        c.execute("INSERT INTO salary(car_id,t,amt,note,ts) VALUES(?,?,?,?,?)",
+                  (car_id, t, amt, note, ts or int(time.time())))
+        c.commit()
+
+def all_salary():
+    with _conn() as c:
+        return [dict(r) for r in c.execute("SELECT * FROM salary ORDER BY ts DESC").fetchall()]
+
+# ---------- settings ----------
+def get_setting(k, default=None):
+    with _conn() as c:
+        r = c.execute("SELECT v FROM settings WHERE k=?", (k,)).fetchone()
+        return r["v"] if r else default
+
+def set_setting(k, v):
+    with _lock, _conn() as c:
+        c.execute("INSERT INTO settings(k,v) VALUES(?,?) ON CONFLICT(k) DO UPDATE SET v=?",
+                  (k, str(v), str(v)))
+        c.commit()
+
+def add_amort_for_month(kurs, ym):
+    """Har moshinaga oylik eskirishni salary jadvaliga 'eskirish' turida yozadi.
+    ym = 'YYYY-MM' — shu oy uchun bir marta yoziladi (dublikat bo'lmasin)."""
+    if get_setting("amort_done_"+ym):
+        return 0
+    n = 0
+    with _lock, _conn() as c:
+        cars = c.execute("SELECT id, amort FROM cars").fetchall()
+        for car in cars:
+            summa = int((car["amort"] or 50) * kurs)
+            c.execute("INSERT INTO salary(car_id,t,amt,note,ts) VALUES(?,?,?,?,?)",
+                      (car["id"], "eskirish", summa, ym+" eskirishi", int(time.time())))
+            n += 1
+        c.commit()
+    set_setting("amort_done_"+ym, "1")
     return n
 
 
-def adminlar():
-    con = _con()
+# ==================== GPS FUNKSIYALAR (car_id bo'yicha) ====================
+def _dist_m(a, b):
+    R = 6371000.0
+    la1, lo1, la2, lo2 = map(math.radians, [a["lat"], a["lon"], b["lat"], b["lon"]])
+    dla, dlo = la2 - la1, lo2 - lo1
+    h = math.sin(dla/2)**2 + math.cos(la1)*math.cos(la2)*math.sin(dlo/2)**2
+    return 2 * R * math.asin(min(1, math.sqrt(h)))
+
+def _min(t1, t2):
     try:
-        rows = con.execute("SELECT * FROM adminlar ORDER BY qoshildi").fetchall()
+        return (datetime.fromisoformat(str(t2)[:19]) - datetime.fromisoformat(str(t1)[:19])).total_seconds()/60.0
     except Exception:
-        rows = []
-    con.close()
-    return [dict(r) for r in rows]
+        return 0.0
 
+def car_gps_token(car_id):
+    """Kuzat tokenini oladi (bo'lmasa yaratadi) — haydovchi GPS yuborish uchun."""
+    with _lock, _conn() as c:
+        r = c.execute("SELECT kuzat_token FROM cars WHERE id=?", (car_id,)).fetchone()
+        tok = r["kuzat_token"] if r and r["kuzat_token"] else None
+        if not tok:
+            tok = secrets.token_urlsafe(10)
+            c.execute("UPDATE cars SET kuzat_token=? WHERE id=?", (tok, car_id))
+            c.commit()
+        return tok
 
-# ---------------- Muddat (ish bitirilishi kerak bo'lgan sana) ----------------
-def _kun_qoldi(muddat):
-    if not muddat:
-        return None
-    try:
-        d = date.fromisoformat(str(muddat)[:10])
-    except Exception:
-        return None
-    return (d - today_tk()).days
+def car_by_kuzat_token(token):
+    with _conn() as c:
+        r = c.execute("SELECT * FROM cars WHERE kuzat_token=?", (token,)).fetchone()
+        return dict(r) if r else None
 
+def car_gps_kod(car_id):
+    """6 xonali kirish kodi (haydovchi kuzat sahifasiga kiradi)."""
+    import random
+    with _lock, _conn() as c:
+        r = c.execute("SELECT gps_kod FROM cars WHERE id=?", (car_id,)).fetchone()
+        kod = r["gps_kod"] if r and r["gps_kod"] else None
+        if not kod:
+            for _ in range(50):
+                k = str(random.randint(100000, 999999))
+                if not c.execute("SELECT 1 FROM cars WHERE gps_kod=?", (k,)).fetchone():
+                    kod = k; break
+            c.execute("UPDATE cars SET gps_kod=? WHERE id=?", (kod, car_id))
+            c.commit()
+        return kod
 
-def set_muddat(mid, sana):
-    """Mijozga ish bitirilish sanasini qo'yish/o'chirish (sana=None -> o'chirish)."""
-    con = _con()
-    con.execute("UPDATE mijozlar SET muddat=? WHERE id=?",
-                ((str(sana)[:10] if sana else None), int(mid)))
-    con.commit()
-    con.close()
-    return {"ok": True}
+def car_by_gps_kod(kod):
+    with _conn() as c:
+        r = c.execute("SELECT * FROM cars WHERE gps_kod=?", (str(kod).strip(),)).fetchone()
+        return dict(r) if r else None
 
+def car_share_token(car_id):
+    """Mijozga jonli kuzatuv tokeni."""
+    with _lock, _conn() as c:
+        r = c.execute("SELECT share_token FROM cars WHERE id=?", (car_id,)).fetchone()
+        tok = r["share_token"] if r and r["share_token"] else None
+        if not tok:
+            tok = secrets.token_urlsafe(8)
+            c.execute("UPDATE cars SET share_token=? WHERE id=?", (tok, car_id))
+            c.commit()
+        return tok
 
-def muddat_royxati():
-    """Muddati bor mijozlar — kun_qoldi bilan (kam qolgan birinchi)."""
-    con = _con()
-    rows = con.execute("SELECT id, ism, tel, muddat FROM mijozlar WHERE muddat IS NOT NULL AND muddat<>''").fetchall()
-    con.close()
-    res = []
-    for r in rows:
-        kq = _kun_qoldi(r["muddat"])
-        if kq is None:
+def car_by_share(token):
+    with _conn() as c:
+        r = c.execute("SELECT * FROM cars WHERE share_token=?", (token,)).fetchone()
+        return dict(r) if r else None
+
+def gps_qosh(car_id, points):
+    if not points: return 0
+    with _lock, _conn() as c:
+        c.executemany("INSERT INTO gps_nuqta(car_id,lat,lon,vaqt,acc) VALUES(?,?,?,?,?)",
+            [(car_id, float(p["lat"]), float(p["lon"]), str(p.get("vaqt") or "")[:19], float(p.get("acc") or 0))
+             for p in points if p.get("lat") is not None and p.get("lon") is not None])
+        c.commit()
+    return len(points)
+
+def gps_oxirgi(car_id):
+    with _conn() as c:
+        r = c.execute("SELECT lat,lon,vaqt,acc FROM gps_nuqta WHERE car_id=? ORDER BY vaqt DESC LIMIT 1", (car_id,)).fetchone()
+        return dict(r) if r else None
+
+def gps_kunlik(car_id, sana):
+    with _conn() as c:
+        rows = c.execute("SELECT lat,lon,vaqt,acc FROM gps_nuqta WHERE car_id=? AND substr(vaqt,1,10)=? ORDER BY vaqt",
+                         (car_id, str(sana)[:10])).fetchall()
+        return [dict(r) for r in rows]
+
+def gps_stops(points, min_daq=5, radius_m=60):
+    stops=[]; n=len(points); i=0
+    while i<n:
+        j=i+1
+        while j<n and _dist_m(points[i],points[j])<=radius_m: j+=1
+        dur=_min(points[i]["vaqt"],points[j-1]["vaqt"]) if j-1>i else 0
+        if dur>=min_daq:
+            seg=points[i:j]
+            stops.append({"lat":sum(p["lat"] for p in seg)/len(seg),"lon":sum(p["lon"] for p in seg)/len(seg),
+                "boshlanish":points[i]["vaqt"],"tugash":points[j-1]["vaqt"],"daqiqa":round(dur)})
+            i=j
+        else: i+=1
+    return stops
+
+def kunlik_xulosa(car_id, sana):
+    pts=gps_kunlik(car_id,sana); stops=gps_stops(pts)
+    # km — sakrashsiz: har segment aniqligini va tezligini tekshiramiz
+    dist=0.0
+    for k in range(1,len(pts)):
+        a,b=pts[k-1],pts[k]
+        m=_dist_m(a,b)
+        # juda noaniq nuqta (60m+) yoki juda kichik harakat (8m-) hisoblanmaydi
+        acc_b=b.get("acc") or 0
+        if m<8 or acc_b>60:
             continue
-        res.append({"id": r["id"], "ism": r["ism"], "tel": r["tel"],
-                    "muddat": r["muddat"], "kun_qoldi": kq})
-    res.sort(key=lambda x: x["kun_qoldi"])
-    return res
+        # tezlik tekshiruvi (sakrash = imkonsiz tez)
+        dt=_min(a["vaqt"],b["vaqt"])*60  # sekund
+        if dt>0:
+            tez=m/dt  # m/s
+            if tez>40:  # 144 km/soat dan tez = GPS xatosi
+                continue
+        dist+=m
+    ish=""
+    if pts: ish=pts[0]["vaqt"][11:16]+" – "+pts[-1]["vaqt"][11:16]
+    return {"nuqtalar":pts,"toxtashlar":stops,"km":round(dist/1000,1),"soni":len(pts),
+            "ish_vaqti":ish,"toxtash_daq":sum(s["daqiqa"] for s in stops)}
 
+def car_seen(car_id):
+    with _lock, _conn() as c:
+        r=c.execute("SELECT offline_xabar FROM cars WHERE id=?", (car_id,)).fetchone()
+        edi=bool(r and r["offline_xabar"])
+        c.execute("UPDATE cars SET last_seen=?, offline_xabar=0 WHERE id=?", (now_tk().isoformat(), car_id))
+        c.commit()
+    return edi
 
-# ---------------- Sozlama (kalit-qiymat) ----------------
-def _sozlama_jadval(con):
-    con.execute("CREATE TABLE IF NOT EXISTS sozlama(kalit TEXT PRIMARY KEY, qiymat TEXT)")
+def mark_offline_xabar(car_id):
+    """Offline xabar berildi deb belgilaymiz (takror xabar bo'lmasin)."""
+    with _lock, _conn() as c:
+        c.execute("UPDATE cars SET offline_xabar=1 WHERE id=?", (car_id,))
+        c.commit()
 
+def car_online(car_id, daqiqa=5):
+    with _conn() as c:
+        r=c.execute("SELECT last_seen FROM cars WHERE id=?", (car_id,)).fetchone()
+    if not r or not r["last_seen"]: return False
+    try:
+        return (now_tk()-datetime.fromisoformat(r["last_seen"])).total_seconds()/60 <= daqiqa
+    except: return False
 
-def get_sozlama(kalit, default=None):
-    con = _con()
-    _sozlama_jadval(con)
-    r = con.execute("SELECT qiymat FROM sozlama WHERE kalit=?", (kalit,)).fetchone()
-    con.close()
-    return r["qiymat"] if r else default
+def gps_age_daqiqa(vaqt):
+    try:
+        d=datetime.fromisoformat(str(vaqt)[:19]); now=now_tk().replace(tzinfo=None)
+        return (now-d).total_seconds()/60
+    except: return None
 
+# yetkazish (mijozga jonli ssilka)
+def yetkazish_qosh(car_id, lat, lon, izoh=None):
+    tok=secrets.token_urlsafe(8)
+    with _lock, _conn() as c:
+        c.execute("INSERT INTO yetkazish(token,car_id,mlat,mlon,izoh,holat,created) VALUES(?,?,?,?,?,'faol',?)",
+                  (tok,int(car_id),float(lat),float(lon),izoh,now_tk().isoformat()))
+        c.commit()
+    return tok
 
-def set_sozlama(kalit, qiymat):
-    con = _con()
-    _sozlama_jadval(con)
-    con.execute("INSERT OR REPLACE INTO sozlama(kalit,qiymat) VALUES(?,?)", (kalit, str(qiymat)))
-    con.commit()
-    con.close()
+def yetkazish_get(token):
+    with _conn() as c:
+        r=c.execute("SELECT * FROM yetkazish WHERE token=?", (token,)).fetchone()
+        return dict(r) if r else None
+
+def yetkazish_faol_car(car_id):
+    """Moshinaga biriktirilgan faol (yakunlanmagan) yetkazish."""
+    with _conn() as c:
+        r=c.execute("SELECT * FROM yetkazish WHERE car_id=? AND holat='faol' ORDER BY created DESC LIMIT 1",
+                    (car_id,)).fetchone()
+        return dict(r) if r else None
+
+def yetkazish_yakunla(token):
+    with _lock, _conn() as c:
+        c.execute("UPDATE yetkazish SET holat='yakunlandi', yakun=? WHERE token=?", (now_tk().isoformat(),token))
+        c.commit()
