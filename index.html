@@ -194,27 +194,31 @@ async function openMijoz(id){
 
   // Mahsulotlar ro'yxati
   h+='<div class="card"><div class="t">📦 Mahsulotlar</div>';
+  window._mahs=d.mahsulotlar||[];
   if(!d.mahsulotlar.length){ h+='<div class="hint">Hali mahsulot yo\'q.</div>'; }
   else{ h+=d.mahsulotlar.map(r=>{
       const vv=r.valyuta||'usd';
       const olcham=(r.eni&&r.boyi)?(''+(+r.eni)+'×'+(+r.boyi)+' = '+(+r.dona)+' m² × '+val(r.narx,vv)):(val(r.narx,vv)+((r.dona&&r.dona!=1)?(' × '+(+r.dona)):''));
       return '<div class="mrow"><div><div class="mnom">'+esc(r.nom)+'</div>'
       +'<div class="msub">'+olcham+' · '+esc((r.sana||'').slice(0,10))+'</div></div>'
-      +'<div class="row"><div class="pill">'+val(r.jami,vv)+'</div><span class="x" onclick="mahsulotOchir('+r.id+','+id+')">✕</span></div></div>';
+      +'<div class="row"><div class="pill">'+val(r.jami,vv)+'</div><span class="x" style="color:#2a8a5a" onclick="mahsulotTahrir('+r.id+','+id+')">✏️</span><span class="x" onclick="mahsulotOchir('+r.id+','+id+')">✕</span></div></div>';
     }).join(''); }
   h+='</div>';
 
   // To'lov qo'shish
   h+='<div class="card"><div class="t">💵 To\'lov qo\'shish</div>'
-   +'<div class="row"><input class="f" id="t_summa" inputmode="numeric" placeholder="Summa"><select class="f" id="t_val" style="max-width:82px"><option value="usd">$</option><option value="som">so\'m</option></select>'
-   +'<button class="btn" onclick="tolovQosh('+id+')">➕</button></div>'
-   +'<div class="hint" style="margin-top:6px">To\'lov shu valyutadagi qarzdan ayiriladi.</div></div>';
+   +'<div class="row"><input class="f" id="t_summa" inputmode="numeric" placeholder="Summa"><select class="f" id="t_val" style="max-width:82px"><option value="usd">$</option><option value="som">so\'m</option></select></div>'
+   +'<div class="row" style="margin-top:8px"><input class="f" type="date" id="t_sana" value="'+bugun+'"><button class="btn" onclick="tolovQosh('+id+')">➕ To\'lov</button></div>'
+   +'<button class="btn" style="width:100%;margin-top:8px;background:#e0982f" onclick="skidkaQosh('+id+')">🎁 Skidka (chegirma)</button>'
+   +'<div class="hint" style="margin-top:6px">To\'lov/skidka shu valyutadagi qarzdan ayiriladi. Sana tanlash mumkin (eski sana ham).</div></div>';
 
   // To'lovlar ro'yxati
   if(d.tolovlar.length){
-    h+='<div class="card"><div class="t">🧾 To\'lovlar</div>'+d.tolovlar.map(t=>'<div class="mrow"><div><div class="mnom">'+val(t.summa,t.valyuta||'usd')+'</div>'
-      +'<div class="msub">'+esc((t.sana||'').slice(0,10))+(t.izoh?(' · '+esc(t.izoh)):'')+'</div></div>'
-      +'<span class="x" onclick="tolovOchir('+t.id+','+id+')">✕</span></div>').join('')+'</div>';
+    h+='<div class="card"><div class="t">🧾 To\'lovlar / Skidka</div>'+d.tolovlar.map(t=>{
+      const sk=((t.izoh||'').toLowerCase().indexOf('skidka')>=0);
+      return '<div class="mrow"><div><div class="mnom">'+(sk?'🎁 ':'')+val(t.summa,t.valyuta||'usd')+'</div>'
+      +'<div class="msub">'+esc((t.sana||'').slice(0,10))+(t.izoh?(' · '+esc(t.izoh)):' · to\'lov')+'</div></div>'
+      +'<span class="x" onclick="tolovOchir('+t.id+','+id+')">✕</span></div>';}).join('')+'</div>';
   }
 
   h+='<button class="btn d" style="width:100%;margin-top:6px" onclick="mijozOchir('+id+')">🗑 Mijozni o\'chirish</button>';
@@ -243,6 +247,26 @@ async function mahsulotQosh(id){
     setTimeout(()=>{ const n=document.getElementById('p_nom'); if(n) n.focus(); },250);
   }catch(e){ toast('❌ '+e.message); }
 }
+window.mahsulotTahrir=function(rid,mid){
+  const r=(window._mahs||[]).find(x=>x.id===rid); if(!r){ toast('Topilmadi'); return; }
+  const vv=r.valyuta||'usd';
+  const ov=_oyna('<div class="t">✏️ Mahsulotni tahrirlash</div>'
+    +'<div class="flab">Tovar nomi</div><input class="f" id="e_nom" value="'+esc(r.nom||'')+'" style="margin-bottom:8px">'
+    +'<div class="row" style="margin-bottom:8px"><div style="flex:1"><div class="flab">Eni (m)</div><input class="f" id="e_eni" inputmode="decimal" value="'+(r.eni||'')+'"></div><div style="flex:1"><div class="flab">Boyi (m)</div><input class="f" id="e_boyi" inputmode="decimal" value="'+(r.boyi||'')+'"></div></div>'
+    +'<div class="row" style="margin-bottom:8px"><div style="flex:1"><div class="flab">Narx (1 m2 yoki jami)</div><input class="f" id="e_narx" inputmode="numeric" value="'+(r.narx||'')+'"></div><div><div class="flab">Valyuta</div><select class="f" id="e_val" style="max-width:88px"><option value="usd"'+(vv==='usd'?' selected':'')+'>$</option><option value="som"'+(vv==='som'?' selected':'')+'>som</option></select></div></div>'
+    +'<div class="hint" style="font-size:11px;margin-bottom:6px">Narx yoki olchamni ozgartirsangiz — tepadagi umumiy avtomat yangilanadi.</div>'
+    +'<div class="tsbtns"><button class="tsno" onclick="this.closest(\'.tsov\').remove()">Bekor</button><button class="tsyes" id="e_ok">Saqlash</button></div>');
+  ov.querySelector('#e_ok').onclick=async()=>{
+    const nom=(ov.querySelector('#e_nom').value||'').trim();
+    if(!nom){ toast('Nom yozing'); return; }
+    try{
+      await api('/api/mahsulot_tahrir',{method:'POST',body:JSON.stringify({
+        id:rid, nom, eni:ov.querySelector('#e_eni').value, boyi:ov.querySelector('#e_boyi').value,
+        narx:ov.querySelector('#e_narx').value, valyuta:ov.querySelector('#e_val').value})});
+      ov.remove(); toast('✅ Saqlandi'); openMijoz(mid);
+    }catch(e){ toast('❌ '+e.message); }
+  };
+};
 async function mahsulotOchir(rid,id){
   if(!await tasdiq('Bu mahsulotni o\'chirasizmi?')) return;
   try{ await api('/api/mahsulot_ochir',{method:'POST',body:JSON.stringify({id:rid})}); openMijoz(id); }catch(e){ toast('❌ '+e.message); }
@@ -250,8 +274,17 @@ async function mahsulotOchir(rid,id){
 async function tolovQosh(id){
   const s=(document.getElementById('t_summa').value||'').trim();
   const valyuta=((document.getElementById('t_val')||{}).value)||'usd';
+  const sana=((document.getElementById('t_sana')||{}).value)||bugun;
   if(!s){ toast('Summa yozing'); return; }
-  try{ await api('/api/tolov_qosh',{method:'POST',body:JSON.stringify({mijoz_id:id,summa:s,valyuta,sana:bugun})}); toast('✅ To\'lov qo\'shildi'); openMijoz(id); }
+  try{ await api('/api/tolov_qosh',{method:'POST',body:JSON.stringify({mijoz_id:id,summa:s,valyuta,sana})}); toast('✅ To\'lov qo\'shildi'); openMijoz(id); }
+  catch(e){ toast('❌ '+e.message); }
+}
+async function skidkaQosh(id){
+  const s=(document.getElementById('t_summa').value||'').trim();
+  const valyuta=((document.getElementById('t_val')||{}).value)||'usd';
+  const sana=((document.getElementById('t_sana')||{}).value)||bugun;
+  if(!s){ toast('Skidka summasini yozing'); return; }
+  try{ await api('/api/tolov_qosh',{method:'POST',body:JSON.stringify({mijoz_id:id,summa:s,valyuta,sana,izoh:'Skidka'})}); toast('🎁 Skidka qo\'shildi'); openMijoz(id); }
   catch(e){ toast('❌ '+e.message); }
 }
 async function tolovOchir(rid,id){

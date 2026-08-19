@@ -146,6 +146,39 @@ def mahsulot_qosh(mijoz_id, nom, narx, dona=1, sana=None, eni=None, boyi=None, v
     return rid
 
 
+def mahsulot_tahrir(rid, nom=None, narx=None, eni=None, boyi=None, valyuta=None):
+    """Mahsulot nom/narx/o'lchov/valyutasini tahrirlaydi (bo'sh maydonlar o'zgarmaydi)."""
+    con = _con()
+    r = con.execute("SELECT * FROM mahsulotlar WHERE id=?", (rid,)).fetchone()
+    if not r:
+        con.close()
+        return {"ok": False}
+    r = dict(r)
+    if nom not in (None, ""):
+        r["nom"] = nom
+    if valyuta:
+        r["valyuta"] = "som" if str(valyuta).lower() in ("som", "so'm", "uzs") else "usd"
+    try:
+        eni = float(eni) if eni not in (None, "") else r.get("eni")
+    except Exception:
+        eni = r.get("eni")
+    try:
+        boyi = float(boyi) if boyi not in (None, "") else r.get("boyi")
+    except Exception:
+        boyi = r.get("boyi")
+    try:
+        if narx not in (None, ""):
+            r["narx"] = float(narx)
+    except Exception:
+        pass
+    dona = round(eni * boyi, 3) if (eni and boyi) else (r.get("dona") or 1)
+    con.execute("UPDATE mahsulotlar SET nom=?, narx=?, dona=?, eni=?, boyi=?, valyuta=? WHERE id=?",
+                (r["nom"], r["narx"], dona, eni, boyi, r.get("valyuta") or "usd", rid))
+    con.commit()
+    con.close()
+    return {"ok": True}
+
+
 def mahsulot_ochir(rid):
     con = _con()
     con.execute("DELETE FROM mahsulotlar WHERE id=?", (rid,))

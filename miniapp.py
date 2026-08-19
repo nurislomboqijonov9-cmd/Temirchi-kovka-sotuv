@@ -136,6 +136,19 @@ def make_web_app(bot_token):
             return web.json_response({"xato": "id kerak"}, status=400)
         return web.json_response(db.set_muddat(mid, b.get("sana") or b.get("muddat")))
 
+    async def api_mahsulot_tahrir(request):
+        uid, err = check(request)
+        if err:
+            return err
+        b = await request.json()
+        try:
+            rid = int(b.get("id"))
+        except Exception:
+            return web.json_response({"xato": "id kerak"}, status=400)
+        return web.json_response(db.mahsulot_tahrir(
+            rid, nom=b.get("nom"), narx=b.get("narx"),
+            eni=b.get("eni"), boyi=b.get("boyi"), valyuta=b.get("valyuta")))
+
     async def api_mijoz_tahrir(request):
         uid, err = check(request)
         if err:
@@ -220,6 +233,7 @@ def make_web_app(bot_token):
     app.router.add_post("/api/mijoz_tahrir", api_mijoz_tahrir)
     app.router.add_post("/api/mijoz_ochir", api_mijoz_ochir)
     app.router.add_post("/api/muddat", api_muddat)
+    app.router.add_post("/api/mahsulot_tahrir", api_mahsulot_tahrir)
     app.router.add_post("/api/mahsulot_qosh", api_mahsulot_qosh)
     app.router.add_post("/api/mahsulot_ochir", api_mahsulot_ochir)
     app.router.add_post("/api/tolov_qosh", api_tolov_qosh)
