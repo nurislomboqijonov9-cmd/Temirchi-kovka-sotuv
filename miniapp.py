@@ -91,7 +91,7 @@ def make_web_app(bot_token):
         uid, err = check(request)
         if err:
             return err
-        return web.json_response({"mijozlar": db.mijozlar()})
+        return web.json_response({"mijozlar": db.mijozlar(), "umumiy": db.umumiy_qarz()})
 
     async def api_qarzdorlar(request):
         uid, err = check(request)

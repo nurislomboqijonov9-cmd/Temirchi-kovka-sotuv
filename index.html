@@ -78,7 +78,7 @@ function muddatBel(m){
 }
 const esc=s=>(s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const bugun=new Date().toISOString().slice(0,10);
-let _view='mijozlar';
+let _view='usd';
 
 function toast(t){ const e=document.getElementById('toast'); e.textContent=t; e.classList.add('on'); setTimeout(()=>e.classList.remove('on'),2200); }
 function tasdiq(msg){ return new Promise(res=>{ const ov=document.createElement('div'); ov.className='tsov';
@@ -101,18 +101,46 @@ async function loadList(){
   document.getElementById('fab').style.display='block';
   app.innerHTML='<div class="empty">Yuklanmoqda…</div>';
   let data;
-  try{ data=await api(_view==='qarzdor'?'/api/qarzdorlar':'/api/mijozlar'); }
+  try{ data=await api('/api/mijozlar'); }
   catch(e){ app.innerHTML='<div class="card"><div class="hint">'+esc(e.message)+'</div></div>'; return; }
-  const list=data.mijozlar||[];
-  let h='<div class="seg"><button class="'+(_view==='mijozlar'?'on':'')+'" onclick="setView(\'mijozlar\')">Hammasi</button>'
-       +'<button class="'+(_view==='qarzdor'?'on':'')+'" onclick="setView(\'qarzdor\')">Qarzdorlar</button></div>';
+  let list=data.mijozlar||[];
+  const um=data.umumiy||{usd:0,som:0,qarzdor:0};
+
+  // Tablar: $ / so'm / Arxiv
+  let h='<div class="seg">'
+    +'<button class="'+(_view==='usd'?'on':'')+'" onclick="setView(\'usd\')">💵 Dollar</button>'
+    +'<button class="'+(_view==='som'?'on':'')+'" onclick="setView(\'som\')">🟢 So\'m</button>'
+    +'<button class="'+(_view==='arxiv'?'on':'')+'" onclick="setView(\'arxiv\')">📂 Arxiv</button></div>';
+
+  // Umumiy qarz banner
+  h+='<div class="card" style="background:#0f3d2e;border:none;margin-bottom:12px">'
+    +'<div style="color:#a9d6bf;font-size:12px;font-weight:700;letter-spacing:.04em">UMUMIY QARZ</div>'
+    +'<div style="color:#fff;font-size:22px;font-weight:900;margin-top:4px">$'+som(um.usd||0)+'  ·  '+som(um.som||0)+' so\'m</div>'
+    +'<div style="color:#a9d6bf;font-size:12px;margin-top:2px">'+(um.qarzdor||0)+' ta qarzdor</div></div>';
+
+  // Filtrlash: valyuta tab / arxiv
+  if(_view==='arxiv'){
+    list=list.filter(m=>m.arxiv);
+  }else if(_view==='som'){
+    list=list.filter(m=>m.bor_som && !m.arxiv);
+    list.sort((a,b)=>(b.qarz_som||0)-(a.qarz_som||0));   // qarz ko'pligi bo'yicha
+  }else{ // usd (default)
+    list=list.filter(m=>m.bor_usd && !m.arxiv);
+    list.sort((a,b)=>(b.qarz_usd||0)-(a.qarz_usd||0));
+  }
+
   h+='<input class="f" id="qidir" placeholder="🔍 Qidirish — ism yoki tel" oninput="filt()" style="margin-bottom:12px">';
-  if(!list.length){ h+='<div class="empty">Hozircha mijoz yo\'q.<br>Pastdagi ＋ tugma bilan qo\'shing.</div>'; app.innerHTML=h; return; }
+  if(!list.length){ h+='<div class="empty">Bu bo\'limda mijoz yo\'q.</div>'; app.innerHTML=h; return; }
   h+='<div id="mlist">'+list.map(m=>{
     const qu=m.qarz_usd||0, qs=m.qarz_som||0;
     let pills='';
-    if(qu||(!qu&&!qs)) pills+='<div class="'+(qu>0?'pill red':'pill')+'">$'+som(qu)+'</div>';
-    if(qs) pills+='<div class="'+(qs>0?'pill red':'pill')+'" style="margin-top:3px">'+som(qs)+' so\'m</div>';
+    if(_view==='som'){
+      pills+='<div class="'+(qs>0?'pill red':'pill')+'">'+som(qs)+' so\'m</div>';
+    }else if(_view==='arxiv'){
+      pills+='<div class="pill">✅ yopildi</div>';
+    }else{
+      pills+='<div class="'+(qu>0?'pill red':'pill')+'">$'+som(qu)+'</div>';
+    }
     return '<div class="card mitem" data-nom="'+esc((m.ism||'').toLowerCase())+' '+esc(m.tel||'')+'" onclick="window._listY=window.scrollY;window._openId=null;openMijoz('+m.id+')" style="cursor:pointer;margin-bottom:10px">'
       +'<div class="row" style="justify-content:space-between">'
       +'<div><div class="mnom">'+esc(m.ism||'—')+'</div><div class="msub">'+esc(m.tel||'')+'</div>'+muddatBel(m)+'</div>'

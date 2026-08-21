@@ -263,13 +263,31 @@ def mijozlar():
     out = []
     for r in rows:
         d = dict(r)
-        qu = round((d["jami_usd"] or 0) - (d["tol_usd"] or 0))
-        qs = round((d["jami_som"] or 0) - (d["tol_som"] or 0))
+        ju = round(d["jami_usd"] or 0); tu = round(d["tol_usd"] or 0)
+        js = round(d["jami_som"] or 0); ts = round(d["tol_som"] or 0)
+        qu = ju - tu
+        qs = js - ts
+        bor_usd = (ju > 0)
+        bor_som = (js > 0)
+        # Arxiv: hech qanaqa qarz yo'q, lekin tarixi bor (to'liq to'langan)
+        arxiv = (qu <= 0 and qs <= 0 and (ju > 0 or js > 0))
         out.append({"id": d["id"], "ism": d["ism"], "tel": d["tel"],
                     "qarz_usd": qu, "qarz_som": qs,
+                    "jami_usd": ju, "jami_som": js,
+                    "bor_usd": bor_usd, "bor_som": bor_som, "arxiv": arxiv,
                     "muddat": d.get("muddat"), "kun_qoldi": _kun_qoldi(d.get("muddat")),
-                    "qarz": qu, "jami": round(d["jami_usd"] or 0), "tolangan": round(d["tol_usd"] or 0)})
+                    "qarz": qu, "jami": ju, "tolangan": tu})
     return out
+
+
+def umumiy_qarz():
+    """Barcha mijozlarning umumiy qarzi (valyuta bo'yicha)."""
+    ms = mijozlar()
+    return {
+        "usd": sum(m["qarz_usd"] for m in ms if m["qarz_usd"] > 0),
+        "som": sum(m["qarz_som"] for m in ms if m["qarz_som"] > 0),
+        "qarzdor": sum(1 for m in ms if m["qarz_usd"] > 0 or m["qarz_som"] > 0),
+    }
 
 
 def qarzdorlar():
