@@ -118,14 +118,14 @@ async function loadList(){
     +'<div style="color:#fff;font-size:22px;font-weight:900;margin-top:4px">$'+som(um.usd||0)+'  ·  '+som(um.som||0)+' so\'m</div>'
     +'<div style="color:#a9d6bf;font-size:12px;margin-top:2px">'+(um.qarzdor||0)+' ta qarzdor</div></div>';
 
-  // Filtrlash: valyuta tab / arxiv
+  // Filtrlash: valyuta tab / arxiv (bo'sh — mahsulotsiz — mijozlar ham ko'rinsin)
   if(_view==='arxiv'){
     list=list.filter(m=>m.arxiv);
   }else if(_view==='som'){
-    list=list.filter(m=>m.bor_som && !m.arxiv);
+    list=list.filter(m=>!m.arxiv && (m.bor_som || (!m.bor_usd && !m.bor_som)));
     list.sort((a,b)=>(b.qarz_som||0)-(a.qarz_som||0));   // qarz ko'pligi bo'yicha
   }else{ // usd (default)
-    list=list.filter(m=>m.bor_usd && !m.arxiv);
+    list=list.filter(m=>!m.arxiv && (m.bor_usd || (!m.bor_usd && !m.bor_som)));
     list.sort((a,b)=>(b.qarz_usd||0)-(a.qarz_usd||0));
   }
 
@@ -134,10 +134,13 @@ async function loadList(){
   h+='<div id="mlist">'+list.map(m=>{
     const qu=m.qarz_usd||0, qs=m.qarz_som||0;
     let pills='';
-    if(_view==='som'){
-      pills+='<div class="'+(qs>0?'pill red':'pill')+'">'+som(qs)+' so\'m</div>';
-    }else if(_view==='arxiv'){
+    const bosh=(!m.bor_usd && !m.bor_som);
+    if(_view==='arxiv'){
       pills+='<div class="pill">✅ yopildi</div>';
+    }else if(bosh){
+      pills+='<div class="pill" style="background:#e8eef5;color:#5A7">🆕 kelishuv</div>';
+    }else if(_view==='som'){
+      pills+='<div class="'+(qs>0?'pill red':'pill')+'">'+som(qs)+' so\'m</div>';
     }else{
       pills+='<div class="'+(qu>0?'pill red':'pill')+'">$'+som(qu)+'</div>';
     }
@@ -190,35 +193,36 @@ async function openMijoz(id){
   if(hasS) h+=(hasU?'<br>':'')+'so\'m: jami '+som(S.jami)+' · to\'langan '+som(S.tolangan);
   h+='</div></div>';
 
-  // Ish bitirilish sanasi (muddat)
-  h+='<div class="card"><div class="t">🗓 Ish bitirilish sanasi</div>';
+  // Ish bitirilish sanasi (muddat) — holat ko'rinadi, tahrir yopiladigan
+  let mudTxt='qo\'yilmagan';
   if(d.kun_qoldi!=null){
     const k=d.kun_qoldi;
     const col=k<0?'#c0392b':(k<=2?'#e67e22':'#1f9d55');
-    const txt=k<0?('⚠️ '+(-k)+' kun oshib ketdi'):(k===0?'Bugun tugaydi':(k+' kun qoldi'));
-    h+='<div style="font-weight:800;color:'+col+';margin-bottom:8px">'+txt+' · '+esc(d.muddat||'')+'</div>';
+    const txt=k<0?('⚠️ '+(-k)+' kun oshdi'):(k===0?'Bugun tugaydi':(k+' kun qoldi'));
+    mudTxt='<b style="color:'+col+'">'+txt+'</b> · '+esc(d.muddat||'');
   }
-  h+='<input class="f" type="date" id="mud_sana" value="'+esc(d.muddat||'')+'" style="margin-bottom:8px">'
+  h+='<div class="card"><div class="t" onclick="tglSek(\'mud\')" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center">🗓 Ish sanasi: '+mudTxt+' <span id="mud_a" style="color:#5B6B7A">▸</span></div>'
+   +'<div id="mud" style="display:none;margin-top:10px">'
+   +'<input class="f" type="date" id="mud_sana" value="'+esc(d.muddat||'')+'" style="margin-bottom:8px">'
    +'<div class="row" style="gap:8px"><button class="send" onclick="saveMuddat('+d.id+',0)">Saqlash</button>'
-   +(d.muddat?'<button class="mini" onclick="saveMuddat('+d.id+',1)">Ochirish</button>':'')+'</div></div>';
+   +(d.muddat?'<button class="mini" onclick="saveMuddat('+d.id+',1)">Ochirish</button>':'')+'</div></div></div>';
 
-  // Mahsulot qo'shish
-  h+='<div class="card"><div class="t">➕ Mahsulot qo\'shish</div>'
-   +'<div class="flab">Tovar nomi</div>'
-   +'<input class="f" id="p_nom" placeholder="masalan: Darvoza" style="margin-bottom:8px" oninput="_kvHisob()">'
-   +'<div class="hint" style="font-size:12px;margin-bottom:6px">📐 Kvadrat uchun eni × bo\'yi (metr) yozing. Oddiy narx uchun bo\'sh qoldiring.</div>'
-   +'<div class="row" style="margin-bottom:8px">'
-     +'<div style="flex:1"><div class="flab">Eni (m)</div><input class="f" id="p_eni" inputmode="decimal" placeholder="—" oninput="_kvHisob()"></div>'
-     +'<span style="align-self:flex-end;padding-bottom:11px;font-weight:700">×</span>'
-     +'<div style="flex:1"><div class="flab">Bo\'yi (m)</div><input class="f" id="p_boyi" inputmode="decimal" placeholder="—" oninput="_kvHisob()"></div>'
+  // Mahsulot qo'shish (yopiladigan)
+  h+='<div class="card"><div class="t" onclick="tglSek(\'pqo\')" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center">\u2795 Mahsulot qo\'shish <span id="pqo_a" style="color:#5B6B7A">\u25b8</span></div>'
+   +'<div id="pqo" style="display:none;margin-top:10px">'
+   +'<div class="flab">Tovar nomi</div><input class="f" id="p_nom" placeholder="masalan: Darvoza" style="margin-bottom:10px">'
+   +'<div class="flab">Hisoblash turi</div><div class="row" style="gap:6px;margin-bottom:10px">'
+     +'<button type="button" id="mb_kv" onclick="pMode(\'kv\')" style="padding:8px 4px;border-radius:9px;border:none;font-size:13px;font-weight:700;cursor:pointer;flex:1;background:#1f7a4d;color:#fff">\ud83d\udcd0 Kvadrat</button>'
+     +'<button type="button" id="mb_dona" onclick="pMode(\'dona\')" style="padding:8px 4px;border-radius:9px;border:none;font-size:13px;font-weight:700;cursor:pointer;flex:1;background:#e8eef5;color:#5B6B7A">\ud83d\udd22 Dona</button>'
+     +'<button type="button" id="mb_jami" onclick="pMode(\'jami\')" style="padding:8px 4px;border-radius:9px;border:none;font-size:13px;font-weight:700;cursor:pointer;flex:1;background:#e8eef5;color:#5B6B7A">\ud83d\udcb0 Umumiy</button>'
    +'</div>'
-   +'<div class="row" style="margin-bottom:6px">'
-     +'<div style="flex:1"><div class="flab">Narx (1 m² yoki jami)</div><input class="f" id="p_narx" inputmode="numeric" placeholder="—" oninput="_kvHisob()"></div>'
-     +'<div><div class="flab">Valyuta</div><select class="f" id="p_val" onchange="_kvHisob()" style="max-width:88px"><option value="usd">$</option><option value="som">so\'m</option></select></div>'
-   +'</div>'
+   +'<div id="pf_kv"><div class="row" style="margin-bottom:8px"><div style="flex:1"><div class="flab">Kvadrat (m\u00b2)</div><input class="f" id="p_kv" inputmode="decimal" placeholder="83" oninput="_kvHisob()"></div><div style="flex:1"><div class="flab">1 m\u00b2 narx</div><input class="f" id="p_kvnarx" inputmode="numeric" oninput="_kvHisob()"></div></div></div>'
+   +'<div id="pf_dona" style="display:none"><div class="row" style="margin-bottom:8px"><div style="flex:1"><div class="flab">Dona</div><input class="f" id="p_dona" inputmode="numeric" placeholder="5" oninput="_kvHisob()"></div><div style="flex:1"><div class="flab">1 dona narx</div><input class="f" id="p_dnarx" inputmode="numeric" oninput="_kvHisob()"></div></div></div>'
+   +'<div id="pf_jami" style="display:none"><div class="flab">Umumiy narx</div><input class="f" id="p_jnarx" inputmode="numeric" placeholder="830" oninput="_kvHisob()" style="margin-bottom:8px"></div>'
+   +'<div class="flab">Valyuta</div><select class="f" id="p_val" onchange="_kvHisob()" style="max-width:120px;margin-bottom:8px"><option value="usd">$</option><option value="som">so\'m</option></select>'
    +'<div id="p_hisob" style="font-weight:700;color:var(--brand2);min-height:20px;margin-bottom:8px"></div>'
-   +'<button class="btn" style="width:100%" onclick="mahsulotQosh('+id+')">➕ Qo\'shish</button>'
-   +'<div class="hint" style="font-size:11px;margin-top:6px;text-align:center">Bir mijozga bir nechta tovar qo\'shsangiz bo\'ladi — har birini alohida qo\'shing.</div></div>';
+   +'<button class="btn" style="width:100%" onclick="mahsulotQosh('+id+')">\u2795 Qo\'shish</button>'
+   +'</div></div>';
 
   // Mahsulotlar ro'yxati
   h+='<div class="card"><div class="t">📦 Mahsulotlar</div>';
@@ -226,19 +230,23 @@ async function openMijoz(id){
   if(!d.mahsulotlar.length){ h+='<div class="hint">Hali mahsulot yo\'q.</div>'; }
   else{ h+=d.mahsulotlar.map(r=>{
       const vv=r.valyuta||'usd';
-      const olcham=(r.eni&&r.boyi)?(''+(+r.eni)+'×'+(+r.boyi)+' = '+(+r.dona)+' m² × '+val(r.narx,vv)):(val(r.narx,vv)+((r.dona&&r.dona!=1)?(' × '+(+r.dona)):''));
+      var olcham;
+      if(r.birlik==='jami'){ olcham='Umumiy: '+val(r.narx,vv); }
+      else if(r.birlik==='dona'){ olcham=(+r.dona)+' dona × '+val(r.narx,vv); }
+      else if(r.eni&&r.boyi){ olcham=(+r.eni)+'×'+(+r.boyi)+' = '+(+r.dona)+' m² × '+val(r.narx,vv); }
+      else { olcham=(+r.dona)+' m² × '+val(r.narx,vv); }
       return '<div class="mrow"><div><div class="mnom">'+esc(r.nom)+'</div>'
       +'<div class="msub">'+olcham+' · '+esc((r.sana||'').slice(0,10))+'</div></div>'
       +'<div class="row"><div class="pill">'+val(r.jami,vv)+'</div><span class="x" style="color:#2a8a5a" onclick="mahsulotTahrir('+r.id+','+id+')">✏️</span><span class="x" onclick="mahsulotOchir('+r.id+','+id+')">✕</span></div></div>';
     }).join(''); }
   h+='</div>';
 
-  // To'lov qo'shish
-  h+='<div class="card"><div class="t">💵 To\'lov qo\'shish</div>'
+  // To'lov qo'shish (yopiladigan)
+  h+='<div class="card"><div class="t" onclick="tglSek(\'tqo\')" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center">💵 To\'lov qo\'shish <span id="tqo_a" style="color:#5B6B7A">▸</span></div><div id="tqo" style="display:none;margin-top:10px">'
    +'<div class="row"><input class="f" id="t_summa" inputmode="numeric" placeholder="Summa"><select class="f" id="t_val" style="max-width:82px"><option value="usd">$</option><option value="som">so\'m</option></select></div>'
    +'<div class="row" style="margin-top:8px"><input class="f" type="date" id="t_sana" value="'+bugun+'"><button class="btn" onclick="tolovQosh('+id+')">➕ To\'lov</button></div>'
    +'<button class="btn" style="width:100%;margin-top:8px;background:#e0982f" onclick="skidkaQosh('+id+')">🎁 Skidka (chegirma)</button>'
-   +'<div class="hint" style="margin-top:6px">To\'lov/skidka shu valyutadagi qarzdan ayiriladi. Sana tanlash mumkin (eski sana ham).</div></div>';
+   +'<div class="hint" style="margin-top:6px">To\'lov/skidka shu valyutadagi qarzdan ayiriladi. Sana tanlash mumkin (eski sana ham).</div></div></div>';
 
   // To'lovlar ro'yxati
   if(d.tolovlar.length){
@@ -256,24 +264,41 @@ async function openMijoz(id){
 
 function _kvHisob(){
   const g=x=>parseFloat((((document.getElementById(x)||{}).value)||'').replace(/\s/g,''))||0;
-  const eni=g('p_eni'), boyi=g('p_boyi'), narx=g('p_narx');
   const vv=((document.getElementById('p_val')||{}).value)||'usd';
   const el=document.getElementById('p_hisob'); if(!el)return;
-  if(eni>0&&boyi>0){ const kv=Math.round(eni*boyi*1000)/1000; el.textContent='📐 '+eni+' × '+boyi+' = '+kv+' m²  ×  '+val(narx,vv)+'  =  '+val(kv*narx,vv); }
-  else if(narx>0){ el.textContent='Jami: '+val(narx,vv); }
-  else el.textContent='';
+  const m=window._pMode||'kv';
+  if(m==='kv'){ const kv=g('p_kv'), narx=g('p_kvnarx'); el.textContent=(kv>0)?(kv+' m\u00b2 \u00d7 '+val(narx,vv)+' = '+val(kv*narx,vv)):''; }
+  else if(m==='dona'){ const dona=g('p_dona'), narx=g('p_dnarx'); el.textContent=(dona>0)?(dona+' dona \u00d7 '+val(narx,vv)+' = '+val(dona*narx,vv)):''; }
+  else { const jami=g('p_jnarx'); el.textContent=(jami>0)?('Jami: '+val(jami,vv)):''; }
 }
+window.pMode=function(m){
+  window._pMode=m;
+  ['kv','dona','jami'].forEach(function(x){
+    var f=document.getElementById('pf_'+x); if(f) f.style.display=(x===m)?'block':'none';
+    var b=document.getElementById('mb_'+x);
+    if(b){ if(x===m){ b.style.background='#1f7a4d'; b.style.color='#fff'; } else { b.style.background='#e8eef5'; b.style.color='#5B6B7A'; } }
+  });
+  _kvHisob();
+};
+window.tglSek=function(id){
+  var e=document.getElementById(id); if(!e)return;
+  var a=document.getElementById(id+'_a');
+  var op=(e.style.display==='none');
+  e.style.display=op?'block':'none';
+  if(a) a.textContent=op?'\u25be':'\u25b8';
+};
 async function mahsulotQosh(id){
-  const nom=(document.getElementById('p_nom').value||'').trim();
-  const narx=(document.getElementById('p_narx').value||'').trim();
-  const eni=(document.getElementById('p_eni').value||'').trim();
-  const boyi=(document.getElementById('p_boyi').value||'').trim();
+  const g=x=>(((document.getElementById(x)||{}).value)||'').trim();
+  const nom=g('p_nom'); if(!nom){ toast('Nom yozing'); return; }
   const valyuta=((document.getElementById('p_val')||{}).value)||'usd';
-  if(!nom){ toast('Nom yozing'); return; }
-  try{ await api('/api/mahsulot_qosh',{method:'POST',body:JSON.stringify({mijoz_id:id,nom,narx,eni,boyi,valyuta,sana:bugun})});
-    toast('✅ Qo\'shildi'); openMijoz(id);
-    setTimeout(()=>{ const n=document.getElementById('p_nom'); if(n) n.focus(); },250);
-  }catch(e){ toast('❌ '+e.message); }
+  const m=window._pMode||'kv';
+  let body;
+  if(m==='kv'){ const kv=g('p_kv'), narx=g('p_kvnarx'); if(!kv||!narx){toast('Kvadrat va narx yozing');return;} body={mijoz_id:id,nom,birlik:'kv',dona:kv,narx,valyuta,sana:bugun}; }
+  else if(m==='dona'){ const dona=g('p_dona'), narx=g('p_dnarx'); if(!dona||!narx){toast('Dona va narx yozing');return;} body={mijoz_id:id,nom,birlik:'dona',dona,narx,valyuta,sana:bugun}; }
+  else { const jami=g('p_jnarx'); if(!jami){toast('Umumiy narx yozing');return;} body={mijoz_id:id,nom,birlik:'jami',dona:1,narx:jami,valyuta,sana:bugun}; }
+  try{ await api('/api/mahsulot_qosh',{method:'POST',body:JSON.stringify(body)});
+    toast('\u2705 Qo\'shildi'); openMijoz(id);
+  }catch(e){ toast('\u274c '+e.message); }
 }
 window.mahsulotTahrir=function(rid,mid){
   const r=(window._mahs||[]).find(x=>x.id===rid); if(!r){ toast('Topilmadi'); return; }

@@ -60,7 +60,7 @@ def init_db():
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         mijoz_id INTEGER, nom TEXT, narx REAL, dona REAL DEFAULT 1,
         sana TEXT, created TEXT)""")
-    for col in ("eni REAL", "boyi REAL", "valyuta TEXT DEFAULT 'usd'"):
+    for col in ("eni REAL", "boyi REAL", "valyuta TEXT DEFAULT 'usd'", "birlik TEXT DEFAULT 'kv'"):
         try:
             con.execute(f"ALTER TABLE mahsulotlar ADD COLUMN {col}")
         except Exception:
@@ -126,7 +126,7 @@ def mijoz_qidir(nom):
 
 
 # ---------------- Mahsulot / To'lov ----------------
-def mahsulot_qosh(mijoz_id, nom, narx, dona=1, sana=None, eni=None, boyi=None, valyuta="usd"):
+def mahsulot_qosh(mijoz_id, nom, narx, dona=1, sana=None, eni=None, boyi=None, valyuta="usd", birlik="kv"):
     con = _con()
     try:
         eni = float(eni) if eni not in (None, "") else None
@@ -136,9 +136,10 @@ def mahsulot_qosh(mijoz_id, nom, narx, dona=1, sana=None, eni=None, boyi=None, v
     if eni and boyi:
         dona = round(eni * boyi, 3)   # kvadrat = eni * bo'yi; narx = 1 m^2 narxi
     val = "som" if str(valyuta).lower() in ("som", "so'm", "uzs") else "usd"
+    bir = birlik if birlik in ("kv", "dona", "jami") else "kv"
     cur = con.execute(
-        "INSERT INTO mahsulotlar(mijoz_id,nom,narx,dona,eni,boyi,valyuta,sana,created) VALUES(?,?,?,?,?,?,?,?,?)",
-        (mijoz_id, nom, float(narx or 0), float(dona or 1), eni, boyi, val,
+        "INSERT INTO mahsulotlar(mijoz_id,nom,narx,dona,eni,boyi,valyuta,birlik,sana,created) VALUES(?,?,?,?,?,?,?,?,?,?)",
+        (mijoz_id, nom, float(narx or 0), float(dona or 1), eni, boyi, val, bir,
          str(sana or today_tk())[:10], now_tk().isoformat()))
     con.commit()
     rid = cur.lastrowid
